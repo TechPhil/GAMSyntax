@@ -235,7 +235,7 @@ function analyze(doc, builtin) {
 /* ===== generic EBNF (W3C, ISO 14977, ANTLR-ish, plain BNF) ===== */
 var EMPTY = { t: 'seq', items: [] };
 
-function stripComments(text, mode) {
+function stripComments(text, mode, esc) {
   var out = '', i = 0, n = text.length, q = null;
   function blank(seg) { return seg.replace(/[^\n]/g, ' '); }
   function toEol(from) { var e = text.indexOf('\n', from); return e < 0 ? n : e; }
@@ -243,7 +243,7 @@ function stripComments(text, mode) {
     var c = text[i], d = text[i + 1];
     if (q) {
       out += c;
-      if (c === '\\' && mode === 'ebnf' && d !== undefined && d !== '\n') { out += d; i += 2; continue; }
+      if (c === '\\' && esc && d !== undefined && d !== '\n') { out += d; i += 2; continue; }
       if (c === q || c === '\n') q = null;
       i++; continue;
     }
@@ -263,11 +263,11 @@ function stripComments(text, mode) {
 
 var RULE_START = /^[ \t]*(?:(?:fragment|public|private)\s+)?(?:(<[^<>\n]+>|[A-Za-z_][\w\-]*)[ \t]*(::=|:=|<-|←|:)|((?:[A-Za-z_][\w\-]*[ \t]+)*[A-Za-z_][\w\-]*)[ \t]*(=))(?![=:>])[ \t]*/;
 
-function splitTopLevel(body) { // cut at ';' outside quotes and brackets
+function splitTopLevel(body, esc) { // cut at ';' outside quotes and brackets
   var parts = [], cur = '', q = null, depth = 0;
   for (var i = 0; i < body.length; i++) {
     var c = body[i];
-    if (q) { cur += c; if (c === '\\') { cur += body[i + 1] || ''; i++; } else if (c === q || c === '\n') q = null; continue; }
+    if (q) { cur += c; if (c === '\\' && esc) { cur += body[i + 1] || ''; i++; } else if (c === q || c === '\n') q = null; continue; }
     if (c === '"' || c === "'") { q = c; cur += c; continue; }
     if (c === '(' || c === '[' || c === '{') depth++;
     if (c === ')' || c === ']' || c === '}') depth = Math.max(0, depth - 1);
@@ -284,7 +284,8 @@ function isClassBody(c) {
   return c[0] === '^' || /#x[0-9A-Fa-f]/.test(c) || /\\/.test(c) || /[^\s\]]-[^\s\]]/.test(c);
 }
 
-function tokE(s, multi) {
+function tokE(s, multi, o) {
+  o = o || {};
   var toks = [], i = 0, n = s.length, m;
   function push(t, start, end) { t.sp = start === 0 || /\s/.test(s[start - 1]); t.raw = s.slice(start, end); toks.push(t); }
   while (i < n) {
@@ -292,9 +293,9 @@ function tokE(s, multi) {
     if (/\s/.test(c) || c === ',') { i++; continue; }
     if (c === '"' || c === "'") {
       var j = i + 1;
-      while (j < n && s[j] !== c && s[j] !== '\n') { if (s[j] === '\\') j++; j++; }
+      while (j < n && s[j] !== c && s[j] !== '\n') { if (s[j] === '\\' && o.esc) j++; j++; }
       if (s[j] === c) {
-        var v = s.slice(i + 1, j).replace(/\\(.)/g, '$1'), end = j + 1;
+        var v = o.esc ? s.slice(i + 1, j).replace(/\\(.)/g, '$1') : s.slice(i + 1, j), end = j + 1;
         var rm = /^\s*\.\.\s*(['"])((?:\\.|[^\\])*?)\1/.exec(s.slice(end));
         if (rm) { push({ k: 'cls', v: '[' + v + '-' + rm[2] + ']' }, i, end + rm[0].length); i = end + rm[0].length; continue; }
         push({ k: 'str', v: v }, i, end); i = end; continue;
@@ -304,7 +305,9 @@ function tokE(s, multi) {
     if (c === '<' && (m = /^<([^<>\n]+)>/.exec(s.slice(i, i + 200)))) { push({ k: 'nt', v: m[1].trim() }, i, i + m[0].length); i += m[0].length; continue; }
     if (c === '[') {
       var k = s.indexOf(']', i + 1);
-      if (k > 0 && isClassBody(s.slice(i + 1, k))) { push({ k: 'cls', v: s.slice(i, k + 1) }, i, k + 1); i = k + 1; continue; }
+      var body = k > 0 ? s.slice(i + 1, k) : '';
+      var w3cClass = o.w3c && body.length > 0 && !/\s/.test(body) && !/<[A-Za-z][^<>\s]*>/.test(body) && !/"[^"]*"|'[^']*'/.test(body) && !(o.names && o.names[body]);
+      if (k > 0 && (isClassBody(body) || w3cClass)) { push({ k: 'cls', v: s.slice(i, k + 1) }, i, k + 1); i = k + 1; continue; }
     }
     if (c === '#' && (m = /^#x[0-9A-Fa-f]+/.exec(s.slice(i, i + 12)))) { push({ k: 'hex', v: m[0] }, i, i + m[0].length); i += m[0].length; continue; }
     if ('(){}[]|/?*+~'.indexOf(c) >= 0) { push({ k: c }, i, i + 1); i++; continue; }
@@ -319,8 +322,8 @@ function tokE(s, multi) {
   return toks;
 }
 
-function parseE(s, warn, multi) {
-  var toks = tokE(s, multi), p = 0;
+function parseE(s, warn, multi, o) {
+  var toks = tokE(s, multi, o), p = 0;
   warn = warn || function () {};
   function expect(k) { if (toks[p] && toks[p].k === k) p++; else warn('missing ' + k); }
   function item() {
@@ -367,7 +370,9 @@ function parseE(s, warn, multi) {
 }
 
 function parseEBNF(text) {
-  var lines = stripComments(text.replace(/\r/g, ''), 'ebnf').split('\n');
+  var probe = text.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\(\*[\s\S]*?\*\)/g, '');
+  var esc = /^[ \t]*(?:fragment\s+)?[A-Za-z_]\w*[ \t]*:(?![=:>])/m.test(probe); // backslash escapes only in ANTLR-style grammars
+  var lines = stripComments(text.replace(/\r/g, ''), 'ebnf', esc).split('\n');
   var rules = {}, ruleOrder = [], warnings = [], chunks = [], cur = null, m;
   lines.forEach(function (ln, li) {
     if ((m = RULE_START.exec(ln))) { cur = { name: (m[1] || m[3]).replace(/^<|>$/g, '').replace(/\s+/g, ' ').trim(), sep: m[2] || m[4], body: ln.slice(m[0].length), line: li + 1 }; chunks.push(cur); }
@@ -375,20 +380,23 @@ function parseEBNF(text) {
   });
   var all = [];
   chunks.forEach(function (ch) {
-    var parts = splitTopLevel(ch.body);
+    var parts = splitTopLevel(ch.body, esc);
     all.push({ name: ch.name, sep: ch.sep, body: parts[0], line: ch.line });
     for (var k = 1; k < parts.length; k++) {
       var m2 = RULE_START.exec(parts[k].replace(/^\s+/, ''));
       if (m2) all.push({ name: (m2[1] || m2[3]).replace(/^<|>$/g, '').replace(/\s+/g, ' ').trim(), sep: m2[2] || m2[4], body: parts[k].replace(/^\s+/, '').slice(m2[0].length), line: ch.line });
     }
   });
+  var seps = all.map(function (r) { return r.sep; }), names = {};
+  all.forEach(function (r) { names[r.name] = 1; });
+  var o = { esc: esc, names: names, w3c: seps.indexOf('::=') >= 0 && seps.indexOf('=') < 0 && seps.indexOf(':') < 0 }; // in W3C notation [ ] is always a character class
   var multi = [];
   all.forEach(function (r) { if (/ /.test(r.name) && multi.indexOf(r.name) < 0) multi.push(r.name); });
   multi.sort(function (a, b) { return b.length - a.length; }); // ISO style: names may contain spaces
   all.forEach(function (r) {
     var body = r.body.trim();
     if (r.sep === '=' && /[\w"')\]}]\s*\.$/.test(body)) body = body.replace(/\s*\.$/, ''); // Wirth-style terminator
-    var warns = [], ast = parseE(body, function (w) { warns.push(w); }, multi);
+    var warns = [], ast = parseE(body, function (w) { warns.push(w); }, multi, o);
     if (!rules[r.name]) { rules[r.name] = []; ruleOrder.push(r.name); }
     rules[r.name].push({ ast: ast, text: body, section: '', sub: '', line: r.line, notes: [] });
     warns.forEach(function (w) { warnings.push({ kind: 'rule', name: r.name, msg: w }); });
@@ -664,6 +672,25 @@ function nEnum(words, maxw) {
     } };
 }
 
+function nGrid(nodes, maxw) {
+  var rows = [[]], rw = 0, GAPX = 8, rowH = 32;
+  nodes.forEach(function (nd) {
+    if (rows[rows.length - 1].length && rw + GAPX + nd.w > maxw) { rows.push([]); rw = 0; }
+    rows[rows.length - 1].push(nd); rw += (rw ? GAPX : 0) + nd.w;
+  });
+  var wmax = Math.max.apply(null, rows.map(function (r) { return r.reduce(function (a, c) { return a + c.w + GAPX; }, -GAPX); }).concat([tw('one of ' + nodes.length)])), W = wmax + 28, H = 28 + rows.length * rowH + 6;
+  return { w: W, up: H / 2, down: H / 2, path: function () { return ''; },
+    draw: function (x, y) {
+      var top = y - H / 2, s = '<g class="rr-enum"><rect x="' + f(x) + '" y="' + f(top) + '" width="' + f(W) + '" height="' + f(H) + '" rx="8"/>' +
+        '<text class="rr-enum-title" x="' + f(x + 14) + '" y="' + f(top + 19) + '">one of ' + nodes.length + '</text></g>';
+      rows.forEach(function (r, ri) {
+        var cx = x + 14;
+        r.forEach(function (nd) { s += nd.draw(cx, top + 28 + ri * rowH + 14); cx += nd.w + GAPX; });
+      });
+      return s;
+    } };
+}
+
 function nNote(text, maxw) {
   var words = text.split(' '), lines = [], line = '';
   words.forEach(function (wd) {
@@ -719,6 +746,12 @@ function build(ast, limit) {
       var its = ast.items;
       if (its.length >= 12 && its.every(function (c) { return c.t === 'term'; }))
         return nEnum(its.map(function (c) { return c.v; }), Math.min(limit - 80, 640));
+      var simple = its.filter(function (c) { return c.t === 'term' || c.t === 'nt' || c.t === 'cls'; });
+      if (simple.length >= 12) { // many plain alternatives: pack them into one "one of N" box
+        var grid = nGrid(simple.map(function (c) { return build(c, limit); }), Math.min(limit - 80, 900));
+        var complex = its.filter(function (c) { return !(c.t === 'term' || c.t === 'nt' || c.t === 'cls'); });
+        return complex.length ? nChoice(complex.map(function (c) { return build(c, limit - 60); }).concat([grid])) : grid;
+      }
       return nChoice(its.map(function (c) { return build(c, limit - 60); }));
     }
     case 'opt': {
@@ -872,4 +905,166 @@ function explore(doc, text) {
   return { full: full, pre: pre, next: next, matches: matches, over: over };
 }
 
-if (typeof module !== 'undefined') module.exports = { detectDialect: detectDialect, parseDoc: parseDoc, parseExpr: parseExpr, tokenize: tokenize, renderSVG: renderSVG, docToEBNF: docToEBNF, explore: explore, build: build };
+/* ===== character-level explorer for ordinary EBNF/ABNF grammars (Earley parser) ===== */
+function classTest(v) {
+  var body = v.slice(1, -1), neg = body[0] === '^', i = neg ? 1 : 0, ranges = [];
+  function unit() {
+    var m = /^#x([0-9A-Fa-f]+)/.exec(body.slice(i));
+    if (m) { i += m[0].length; return parseInt(m[1], 16); }
+    if (body[i] === '\\' && i + 1 < body.length) i++;
+    var cp = body.codePointAt(i); i += cp > 0xffff ? 2 : 1; return cp;
+  }
+  while (i < body.length) {
+    var lo = unit(), hi = lo;
+    if (body[i] === '-' && i + 1 < body.length) { i++; hi = unit(); }
+    ranges.push([lo, hi]);
+  }
+  return function (ch) {
+    var cp = ch.codePointAt(0), hit = false;
+    for (var k = 0; k < ranges.length; k++) if (cp >= ranges[k][0] && cp <= ranges[k][1]) { hit = true; break; }
+    return neg ? !hit : hit;
+  };
+}
+
+function compileGrammar(doc) {
+  var nts = [], ntId = {}, prods = [], byLhs = [], wild = {};
+  function newNT(name) { nts.push(name); byLhs.push([]); return nts.length - 1; }
+  function ruleId(name) { if (ntId[name] === undefined) ntId[name] = newNT(name); return ntId[name]; }
+  function addProd(lhs, rhs) { byLhs[lhs].push(prods.length); prods.push({ lhs: lhs, rhs: rhs }); }
+  function wildcard(label) {
+    if (wild[label] !== undefined) return wild[label];
+    var w = newNT(null); wild[label] = w;
+    var C = { c: true, test: function (ch) { return !/\s/.test(ch); }, desc: '<' + label + '>', val: true };
+    addProd(w, [C]); addProd(w, [{ n: w }, C]);
+    return w;
+  }
+  function termText(n) { return n.raw && /^#x[0-9A-Fa-f]+$/.test(n.v) ? String.fromCodePoint(parseInt(n.v.slice(2), 16)) : n.v; }
+  function seqOf(n) {
+    var out = [], X, k;
+    switch (n.t) {
+      case 'term': {
+        var v = termText(n), chars = Array.from(v);
+        return chars.map(function (ch, j) { return { c: true, test: function (x) { return x === ch; }, desc: v, lit: { text: v, idx: j }, ws: /^\s$/.test(ch) }; });
+      }
+      case 'cls': { var t = classTest(n.v); return [{ c: true, test: t, desc: n.v, cls: true, ws: t(' ') || t('\t') }]; }
+      case 'nt': return [{ n: G.rules[n.v] ? ruleId(n.v) : wildcard(n.v) }];
+      case 'prose': return [{ n: wildcard((n.text || 'text').slice(0, 28)) }];
+      case 'seq': n.items.forEach(function (c) { out = out.concat(seqOf(c)); }); return out;
+      case 'choice': X = newNT(null); n.items.forEach(function (c) { addProd(X, seqOf(c)); }); return [{ n: X }];
+      case 'opt': X = newNT(null); addProd(X, []); addProd(X, seqOf(n.item)); return [{ n: X }];
+      case 'star': X = newNT(null); addProd(X, []); addProd(X, [{ n: X }].concat(seqOf(n.item))); return [{ n: X }];
+      case 'plus': X = newNT(null); addProd(X, seqOf(n.item)); addProd(X, [{ n: X }].concat(seqOf(n.item))); return [{ n: X }];
+      case 'rep': {
+        var mn = Math.min(n.min, 30);
+        for (k = 0; k < mn; k++) out = out.concat(seqOf(n.item));
+        if (n.max === Infinity) { X = newNT(null); addProd(X, []); addProd(X, [{ n: X }].concat(seqOf(n.item))); out.push({ n: X }); }
+        else for (k = 0; k < Math.min(n.max - mn, 20); k++) { X = newNT(null); addProd(X, []); addProd(X, seqOf(n.item)); out.push({ n: X }); }
+        return out;
+      }
+      case 'except': return seqOf(n.a);
+      case 'not': return [{ c: true, test: function () { return true; }, desc: 'any character', cls: true }];
+    }
+    return [];
+  }
+  var G = { rules: doc.rules, nts: nts, ntId: ntId, prods: prods, byLhs: byLhs };
+  doc.ruleOrder.forEach(function (name) {
+    var id = ruleId(name);
+    doc.rules[name].forEach(function (d) { addProd(id, seqOf(d.ast)); });
+  });
+  var nullable = [], i, changed = true;
+  for (i = 0; i < nts.length; i++) nullable.push(false);
+  while (changed) {
+    changed = false;
+    prods.forEach(function (p) {
+      if (!nullable[p.lhs] && p.rhs.every(function (s) { return s.n !== undefined && nullable[s.n]; })) { nullable[p.lhs] = true; changed = true; }
+    });
+  }
+  G.nullable = nullable;
+  return G;
+}
+
+function earley(G, start, text, cap) {
+  var chars = Array.from(text), n = chars.length, prods = G.prods, chart = [], total = 0, over = false, last = -1;
+  function mk() { return { items: [], seen: {}, wait: {} }; }
+  chart.push(mk());
+  function add(i, p, d, o) {
+    var c = chart[i], k = p + ',' + d + ',' + o;
+    if (c.seen[k]) return;
+    c.seen[k] = 1; c.items.push([p, d, o]); total++;
+  }
+  G.byLhs[start].forEach(function (p) { add(0, p, 0, 0); });
+  for (var i = 0; i <= n; i++) {
+    var c = chart[i];
+    for (var x = 0; x < c.items.length; x++) {
+      if (total > cap) { over = true; break; }
+      var it = c.items[x], pr = prods[it[0]], d = it[1], o = it[2];
+      if (d === pr.rhs.length) {
+        var w = chart[o].wait[pr.lhs];
+        if (w) for (var y = 0; y < w.length; y++) add(i, w[y][0], w[y][1] + 1, w[y][2]);
+      } else {
+        var s = pr.rhs[d];
+        if (s.n !== undefined) {
+          (c.wait[s.n] = c.wait[s.n] || []).push(it);
+          var bl = G.byLhs[s.n];
+          for (var z = 0; z < bl.length; z++) add(i, bl[z], 0, i);
+          if (G.nullable[s.n]) add(i, it[0], d + 1, o);
+        } else if (i < n && s.test(chars[i])) {
+          if (!chart[i + 1]) chart.push(mk());
+          add(i + 1, it[0], d + 1, o);
+        }
+      }
+    }
+    if (over) break;
+    last = i;
+    if (i < n && !chart[i + 1]) break; // no rule allows chars[i] here
+  }
+  return { chart: chart, last: last, n: n, chars: chars, over: over };
+}
+
+function nextCandidates(G, R) {
+  var c = R.chart[R.last], seen = {}, cands = [], wsOK = false;
+  if (!c) return { cands: cands, wsOK: false };
+  c.items.forEach(function (it) {
+    var s = G.prods[it[0]].rhs[it[1]];
+    if (!s || s.n !== undefined) return;
+    if (s.ws) { wsOK = true; return; }
+    var key = s.lit ? 'L' + s.lit.text + '@' + s.lit.idx : 'C' + s.desc;
+    if (seen[key]) return;
+    seen[key] = 1;
+    cands.push(s.lit ? { kind: s.lit.text.length > 1 ? 'lit' : 'chr', label: s.lit.text, insert: s.lit.text.slice(s.lit.idx), lead: '' } : { kind: s.val ? 'val' : 'cls', label: s.desc, insert: '', lead: '' });
+  });
+  return { cands: cands, wsOK: wsOK };
+}
+
+function exploreChars(doc, startName, text) {
+  var G = doc._G || (doc._G = compileGrammar(doc)), sid = G.ntId[startName];
+  if (sid === undefined) return null;
+  var CAP = 400000, R = earley(G, sid, text, CAP), base = nextCandidates(G, R), cands = base.cands;
+  if (R.last === R.n && base.wsOK && !/\s$/.test(text)) {
+    var R2 = earley(G, sid, text + ' ', CAP);
+    if (R2.last === R2.n) nextCandidates(G, R2).cands.forEach(function (c) { c.lead = ' '; c.insert = ' ' + c.insert; cands.push(c); });
+  }
+  var rank = { lit: 0, chr: 1, cls: 2, val: 3 };
+  cands.sort(function (a, b) { return rank[a.kind] - rank[b.kind] || (a.label < b.label ? -1 : a.label > b.label ? 1 : 0); });
+  var done = false, prog = {}, c = R.chart[R.last], seenIt = {}, stack = [], budget = 30000;
+  if (c) c.items.forEach(function (it) {
+    var pr = G.prods[it[0]];
+    if (R.last === R.n && it[1] === pr.rhs.length && pr.lhs === sid && it[2] === 0) done = true;
+    if (it[1] < pr.rhs.length) stack.push(it);
+  });
+  // walk up from the live items to every rule that is still open around them
+  while (stack.length && budget-- > 0) {
+    var cur = stack.pop(), pr2 = G.prods[cur[0]], key = cur[0] + ',' + cur[1] + ',' + cur[2];
+    if (seenIt[key]) continue;
+    seenIt[key] = 1;
+    var nm = G.nts[pr2.lhs];
+    if (nm !== null && cur[1] > 0) prog[nm] = Math.max(prog[nm] || 0, R.last - cur[2]);
+    var parents = R.chart[cur[2]] && R.chart[cur[2]].wait[pr2.lhs];
+    if (parents) parents.forEach(function (p) { stack.push(p); });
+  }
+  var rules = Object.keys(prog).map(function (k) { return { name: k, consumed: prog[k] }; })
+    .sort(function (a, b) { return b.consumed - a.consumed || (a.name < b.name ? -1 : 1); });
+  return { cands: cands, done: done, rules: rules, valid: R.last, n: R.n, chars: R.chars, over: R.over, dead: R.last < R.n && !R.over };
+}
+
+if (typeof module !== 'undefined') module.exports = { detectDialect: detectDialect, parseDoc: parseDoc, parseExpr: parseExpr, tokenize: tokenize, renderSVG: renderSVG, docToEBNF: docToEBNF, explore: explore, exploreChars: exploreChars, build: build };

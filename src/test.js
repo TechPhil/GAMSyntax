@@ -10,3 +10,9 @@ for (const f of files) {
   console.log(path.basename(f).padEnd(22), doc.dialect.padEnd(9), 'rules', String(doc.ruleOrder.length).padStart(4), 'commands', String(doc.commands.length).padStart(4),
     'undefined', String(doc.issues.undef.length).padStart(3), 'bracket warnings', String(doc.issues.warnings.length).padStart(3), bad ? 'LAYOUT ERRORS ' + bad : 'ok');
 }
+
+// Explorer smoke test: the JSON example should accept {"a":1} and suggest ',' or '}' afterwards.
+const fsx = require('fs'), pathx = require('path');
+const jdoc = core.parseDoc(fsx.readFileSync(pathx.join(__dirname, 'samples', 'json.abnf'), 'utf8'));
+const jr = core.exploreChars(jdoc, 'JSON-text', '{"a":1');
+console.log('explore JSON:', jr.cands.slice(0, 6).map(c => c.label).join(' '), jr.done ? '(complete)' : '');

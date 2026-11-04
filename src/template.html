@@ -73,7 +73,7 @@ button{cursor:pointer}
 .content{padding:20px 20px 40px;max-width:100%}
 .content h2{margin:0;font-family:var(--mono);font-size:16px;font-weight:600;overflow-wrap:anywhere}
 .meta{margin:4px 0 12px;color:var(--muted);font-size:13px}
-pre.syntax{margin:0 0 16px;padding:10px 12px;background:var(--panel);border:1px solid var(--rule);border-radius:6px;font:12px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+pre.syntax{max-height:240px;overflow:auto;margin:0 0 16px;padding:10px 12px;background:var(--panel);border:1px solid var(--rule);border-radius:6px;font:12px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
 .canvas{overflow-x:auto;background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:6px}
 .rnote{margin:-8px 0 14px;padding:0 2px;color:var(--muted);font-size:13px;overflow-wrap:anywhere}
 .card .rnote{margin:6px 12px 0}
@@ -101,6 +101,9 @@ pre.syntax{margin:0 0 16px;padding:10px 12px;background:var(--panel);border:1px 
 .xmatches .item{width:auto;max-width:100%}
 .xmatches .item .ok{color:var(--accent);margin-left:6px;font-family:var(--sans);font-size:11.5px}
 .xmore{background:none;border:0;color:var(--accent);padding:4px 2px;font-size:13px}
+.xmsg{margin:0 0 12px;padding:8px 12px;border-radius:6px;font-size:13px;border:1px solid var(--rule);background:var(--panel)}
+.xmsg.good{border-color:var(--nt-stroke);color:var(--accent)}
+.xmsg.bad{border-color:var(--warn);color:var(--warn)}
 .notice{padding:14px 16px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);max-width:70ch}
 .notice p{margin:0 0 8px}
 .status{min-height:18px;margin:8px 0 0;color:var(--warn);font-size:13px}
@@ -189,12 +192,12 @@ __CORE__
   tw = function (s) { return mctx.measureText(s).width; };
 
   var $ = function (s) { return document.querySelector(s); };
-  var doc, srcLabel, lastText = '', dialect = 'auto', order = 'doc', tab = 'rule', sel = null, open = [], limit = 1000, zoom = 1, view = 'diagram', q = '', status = '', ebnfCache = null, xtext = '', xsel = null, xall = false;
+  var doc, srcLabel, lastText = '', dialect = 'auto', order = 'doc', tab = 'rule', sel = null, open = [], limit = 1000, zoom = 1, view = 'diagram', q = '', status = '', ebnfCache = null, xtext = '', xsel = null, xall = false, xstart = '', xrule = null;
 
   function load(text, label, save) {
     doc = parseDoc(text, dialect); srcLabel = label; ebnfCache = null; lastText = text;
     sel = doc.commands.length ? { t: 'cmd', id: 0 } : (doc.ruleOrder.length ? { t: 'rule', name: doc.ruleOrder[0] } : null);
-    tab = doc.commands.length ? 'cmd' : 'rule'; xtext = ''; xsel = null; xall = false;
+    tab = doc.commands.length ? 'cmd' : 'rule'; xtext = ''; xsel = null; xall = false; xstart = ''; xrule = null;
     open = []; view = 'diagram'; status = ''; q = ''; $('#q').value = '';
     if (save) { try { localStorage.setItem(KEY, text); } catch (e) {} }
     renderAll();
@@ -211,7 +214,7 @@ __CORE__
     var tabs = [];
     if (doc.commands.length) tabs.push(['cmd', 'Commands', doc.commands.length]);
     tabs.push(['rule', 'Rules', doc.ruleOrder.length], ['iss', 'Issues', nIss]);
-    if (doc.commands.length) tabs.push(['x', 'Explore', '']);
+    tabs.push(['x', 'Explore', '']);
     if (!tabs.some(function (x) { return x[0] === tab; })) tab = 'rule';
     $('#tabs').innerHTML = tabs.map(function (t) {
       return '<button class="tab" role="tab" data-tab="' + t[0] + '" aria-selected="' + (tab === t[0]) + '">' + t[1] +
@@ -241,7 +244,8 @@ __CORE__
       });
       if (!n2) h = '<p class="issue-note">No rules match.</p>';
     } else if (tab === 'x') {
-      h = '<p class="issue-note">Type the start of a command in the box on the right. The words that can legally come next appear as you type, along with every command that is still possible.</p><p class="issue-note">Click a word to add it. Press Tab to accept the only suggestion.</p>';
+      if (!doc.commands.length) h = '<p class="issue-note">Type some text that the grammar should accept. The pieces that can legally come next appear as you type, with the rules you are currently inside.</p><p class="issue-note">Click a suggestion to add it. Press Tab to accept the only keyword.</p>';
+      else h = '<p class="issue-note">Type the start of a command in the box on the right. The words that can legally come next appear as you type, along with every command that is still possible.</p><p class="issue-note">Click a word to add it. Press Tab to accept the only suggestion.</p>';
     } else {
       var I = doc.issues;
       var typos = I.undef.filter(function (u) { return u.suggest; }), others = I.undef.filter(function (u) { return !u.suggest; });
@@ -310,10 +314,20 @@ __CORE__
       return;
     }
     if (view === 'explore') {
-      el.innerHTML = '<h2>Explore command paths</h2><p class="meta">Start typing a command. The next possible words update as you type.</p>' +
-        '<input id="xq" class="xq" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Type a command">' +
-        '<div id="xres"></div>';
-      $('#xq').value = xtext; $('#xq').placeholder = (doc.prefix || 'command') + ' ';
+      if (doc.commands.length) {
+        el.innerHTML = '<h2>Explore command paths</h2><p class="meta">Start typing a command. The next possible words update as you type.</p>' +
+          '<input id="xq" class="xq" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Type a command">' +
+          '<div id="xres"></div>';
+        $('#xq').placeholder = (doc.prefix || 'command') + ' ';
+      } else {
+        var sname = xstart && doc.rules[xstart] ? xstart : doc.start;
+        el.innerHTML = '<h2>Explore what can come next</h2><p class="meta">Type text the grammar should accept. Suggestions show what can legally follow, character by character.</p>' +
+          '<label class="sel" style="margin-bottom:8px">Start rule <select id="xstart" aria-label="Start rule">' +
+          doc.ruleOrder.map(function (n) { return '<option value="' + esc(n) + '"' + (n === sname ? ' selected' : '') + '>' + esc(n) + '</option>'; }).join('') + '</select></label>' +
+          '<input id="xq" class="xq" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Type text to match">' +
+          '<div id="xres"></div>';
+      }
+      $('#xq').value = xtext;
       renderExplore();
       return;
     }
@@ -364,7 +378,48 @@ __CORE__
     applyZoom();
   }
 
-  function renderExplore() {
+  function renderExplore() { if (doc.commands.length) renderExploreWords(); else renderExploreChars(); }
+
+  function renderExploreChars() {
+    var box = $('#xres'); if (!box) return;
+    var start = xstart && doc.rules[xstart] ? xstart : doc.start, r = start ? exploreChars(doc, start, xtext) : null, h = '';
+    if (!r) { box.innerHTML = '<div class="notice"><p>This grammar has no rules to explore.</p></div>'; return; }
+    var good = r.chars.slice(0, r.valid).join('');
+    if (r.dead) h += '<div class="xmsg bad">Nothing in the grammar allows ' + esc('“' + r.chars[r.valid] + '”') + ' after ' + esc('“' + good + '”') + '. Showing what could follow ' + esc('“' + good + '”') + ' instead.</div>';
+    else if (r.done) h += '<div class="xmsg good">That is a complete ' + esc(start) + '. It can also continue, if more is listed below.</div>';
+    if (r.over) h += '<div class="xmsg bad">This grammar is very large here, so the suggestions may be incomplete.</div>';
+    var kws = r.cands.filter(function (c) { return c.kind === 'lit'; }), others = r.cands.filter(function (c) { return c.kind !== 'lit'; });
+    if (!kws.length && !others.length) h += '<div class="xhead">Next</div><p class="meta">Nothing can follow. ' + (r.done ? 'The text is complete.' : '') + '</p>';
+    if (kws.length) {
+      var cap = xall ? 1e9 : 80;
+      h += '<div class="xhead">Next keywords<span class="n">' + kws.length + '</span></div><div class="chips">';
+      kws.slice(0, cap).forEach(function (c) { h += '<button class="chip kw" data-xi="' + encodeURIComponent(c.insert) + '" type="button" title="' + esc(c.lead ? 'Adds a space first' : 'Add this') + '">' + esc(c.label) + '</button>'; });
+      if (kws.length > cap) h += '<button class="xmore" data-xall="1" type="button">Show all ' + kws.length + '</button>';
+      h += '</div>';
+    }
+    if (others.length) {
+      h += '<div class="xhead">Or a character or value<span class="n">' + others.length + '</span></div><div class="chips">';
+      others.slice(0, 60).forEach(function (c) {
+        if (c.kind === 'chr') h += '<button class="chip kw" data-xi="' + encodeURIComponent(c.insert) + '" type="button">' + esc(c.label) + '</button>';
+        else h += '<span class="chip' + (c.kind === 'val' ? ' undef' : '') + '" style="cursor:default" title="Type something that matches this">' + esc(c.label) + '</span>';
+      });
+      h += '</div>';
+    }
+    var inner = r.rules.filter(function (x) { return doc.rules[x.name]; });
+    if (inner.length) {
+      h += '<div class="xhead">Rules you are inside<span class="n">outermost first</span></div><div class="xmatches">';
+      inner.slice(0, 40).forEach(function (x) { h += '<button class="item" data-xrule="' + esc(x.name) + '"' + (xrule === x.name ? ' aria-current="true"' : '') + '>' + esc(x.name) + '</button>'; });
+      h += '</div>';
+    }
+    if (xrule && doc.rules[xrule]) {
+      h += '<div class="xhead">' + esc(xrule) + '</div>';
+      doc.rules[xrule].forEach(function (d) { h += '<pre class="syntax">' + esc(d.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + diagramHTML(d.ast); });
+    }
+    box.innerHTML = h;
+    applyZoom();
+  }
+
+  function renderExploreWords() {
     var box = $('#xres'); if (!box) return;
     var r = explore(doc, xtext), h = '', kws = r.next.filter(function (e) { return e.kind === 'kw'; }), vals = r.next.filter(function (e) { return e.kind === 'val'; });
     var nDone = r.matches.filter(function (m) { return m.done; }).length;
@@ -426,6 +481,12 @@ __CORE__
       var xi = $('#xq'); if (xi) { xi.focus(); xi.setSelectionRange(xi.value.length, xi.value.length); }
       return;
     }
+    if ((b = t.closest('[data-xi]'))) {
+      setX(xtext + decodeURIComponent(b.dataset.xi));
+      var xi2 = $('#xq'); if (xi2) { xi2.focus(); xi2.setSelectionRange(xi2.value.length, xi2.value.length); }
+      return;
+    }
+    if ((b = t.closest('[data-xrule]'))) { xrule = xrule === b.dataset.xrule ? null : b.dataset.xrule; renderExplore(); return; }
     if ((b = t.closest('[data-xsel]'))) { xsel = +b.dataset.xsel; renderExplore(); return; }
     if ((b = t.closest('[data-xall]'))) { xall = true; renderExplore(); return; }
     if ((b = t.closest('[data-close]'))) { open = open.filter(function (n) { return n !== b.dataset.close; }); renderContent(); return; }
@@ -465,6 +526,11 @@ __CORE__
   document.addEventListener('keydown', function (e) {
     if (e.key === 'Escape') $('#panel').classList.remove('on');
     if (e.key === 'Tab' && e.target.id === 'xq' && !e.shiftKey) {
+      if (!doc.commands.length) {
+        var rr = exploreChars(doc, xstart && doc.rules[xstart] ? xstart : doc.start, e.target.value);
+        if (rr && rr.cands.length === 1 && rr.cands[0].kind === 'lit') { e.preventDefault(); setX(e.target.value + rr.cands[0].insert); e.target.setSelectionRange(e.target.value.length, e.target.value.length); }
+        return;
+      }
       var kw = explore(doc, e.target.value).next.filter(function (x) { return x.kind === 'kw'; });
       if (kw.length === 1) { e.preventDefault(); setX((/\s$/.test(xtext) || !xtext ? xtext : xtext.replace(/\S+$/, '')) + kw[0].text + ' '); e.target.setSelectionRange(e.target.value.length, e.target.value.length); }
     }
@@ -476,7 +542,10 @@ __CORE__
     dialect = 'auto'; $('#dialect').value = 'auto'; load(s.text, s.name, false); e.target.value = '';
   });
   $('#dialect').addEventListener('change', function (e) { dialect = e.target.value; if (lastText) load(lastText, srcLabel, false); });
-  document.addEventListener('change', function (e) { if (e.target.id === 'order') { order = e.target.value; renderSide(); } });
+  document.addEventListener('change', function (e) {
+    if (e.target.id === 'order') { order = e.target.value; renderSide(); }
+    if (e.target.id === 'xstart') { xstart = e.target.value; xrule = null; xall = false; renderExplore(); }
+  });
 
   var saved = null;
   try { saved = localStorage.getItem(KEY); } catch (e) {}

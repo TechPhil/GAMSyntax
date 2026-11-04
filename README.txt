@@ -14,11 +14,15 @@ Supported notations (Syntax menu, default is auto-detect)
                comments: (* *)  /* */  //  #
   ABNF         RFC 5234  (%x41-5A, 1*DIGIT, 3*5 x, =/ , ; comments)
   Informal     command usage lines such as "tool print users [todrive] ..." plus rule
-               definitions. Gives a Commands list and an Explore box that shows the
-               next possible words as you type.
+               definitions. Gives a Commands list in addition to everything below.
 
 Features
   Rules tab      every rule as a railroad diagram; click any blue box to open that rule
+  Explore tab    type text and see what can legally come next. Command-style files
+                 suggest the next word and list the matching commands. Every other
+                 grammar suggests the next keyword, character or value, shows the
+                 rules you are currently inside, and says when the text is complete.
+                 Pick any rule as the start rule.
   Issues tab     undefined names (with "did you mean"), duplicate rules, unreferenced
                  rules, unbalanced brackets, all with line numbers
   Export         converts the whole grammar to one consistent W3C EBNF text
