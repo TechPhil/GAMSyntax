@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GAM syntax viewer</title>
+<style>
+:root{
+  --bg:#eef1f4; --panel:#fbfcfd; --ink:#18222c; --muted:#5a6a78; --rule:#d3dae1; --hover:#e6ebf0; --sel:#dfe7fb;
+  --accent:#2547c9; --warn:#a4380f; --line:#334455;
+  --term-bg:#fff2cf; --term-stroke:#b7841c; --nt-bg:#e3e9fc; --nt-stroke:#4a63c7; --enum-stroke:#8a97a4;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  color-scheme:light;
+  box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#10151b; --panel:#171e26; --ink:#e4eaf0; --muted:#93a3b2; --rule:#29333e; --hover:#202a35; --sel:#1f2d52;
+    --accent:#8ea6ff; --warn:#ff9a6b; --line:#8da1b3;
+    --term-bg:#3a3015; --term-stroke:#c99a2e; --nt-bg:#1c2850; --nt-stroke:#6f8cff; --enum-stroke:#6b7a88;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#10151b; --panel:#171e26; --ink:#e4eaf0; --muted:#93a3b2; --rule:#29333e; --hover:#202a35; --sel:#1f2d52;
+  --accent:#8ea6ff; --warn:#ff9a6b; --line:#8da1b3;
+  --term-bg:#3a3015; --term-stroke:#c99a2e; --nt-bg:#1c2850; --nt-stroke:#6f8cff; --enum-stroke:#6b7a88;
+  color-scheme:dark;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans)}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+.app{display:grid;grid-template-columns:330px minmax(0,1fr);height:100%}
+.side{display:flex;flex-direction:column;min-height:0;background:var(--panel);border-right:1px solid var(--rule)}
+.side-head{padding:16px 16px 10px}
+.side-head h1{margin:0 0 2px;font-size:17px;font-weight:650;letter-spacing:-.01em}
+.src{margin:0;color:var(--muted);font-size:12.5px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.btn{border:1px solid var(--rule);background:var(--panel);border-radius:6px;padding:5px 10px;font-size:13px}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+:root[data-theme="dark"] .btn.primary{color:#10151b}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn.primary{color:#10151b}}
+.tabs{display:flex;border-bottom:1px solid var(--rule);padding:0 8px}
+.tab{background:none;border:0;border-bottom:2px solid transparent;padding:8px 10px;color:var(--muted);font-size:13px}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+.tab .n{color:var(--muted);font-weight:400;margin-left:4px}
+.tab .n.bad{color:var(--warn);font-weight:600}
+.search{margin:10px 12px 6px;border:1px solid var(--rule);background:var(--bg);border-radius:6px;padding:6px 9px;width:calc(100% - 24px);box-sizing:border-box}
+.list{flex:1;min-height:0;overflow:auto;padding:0 6px 14px}
+.grp{margin:12px 8px 4px;color:var(--muted);font-size:12px;font-weight:600}
+.item{display:block;width:100%;text-align:left;border:0;background:none;padding:4px 8px;border-radius:5px;font-family:var(--mono);font-size:12px;line-height:1.35;overflow-wrap:anywhere}
+.item:hover{background:var(--hover)}
+.item[aria-current="true"]{background:var(--sel)}
+.item .x{color:var(--muted)}
+.issue-h{margin:14px 8px 4px;font-size:13px;font-weight:600}
+.issue-note{margin:2px 8px 6px;color:var(--muted);font-size:12.5px}
+
+.main{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:auto}
+.bar{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 20px;background:var(--bg);border-bottom:1px solid var(--rule)}
+.bar label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
+.bar input[type=range]{width:130px}
+.bar .sp{flex:1}
+.zoom{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:13px}
+.zoom .btn{padding:3px 9px}
+.content{padding:20px 20px 40px;max-width:100%}
+.content h2{margin:0;font-family:var(--mono);font-size:16px;font-weight:600;overflow-wrap:anywhere}
+.meta{margin:4px 0 12px;color:var(--muted);font-size:13px}
+pre.syntax{margin:0 0 16px;padding:10px 12px;background:var(--panel);border:1px solid var(--rule);border-radius:6px;font:12px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.canvas{overflow-x:auto;background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:6px}
+.def-h{margin:14px 0 6px;color:var(--muted);font-size:13px}
+.refs{margin:18px 0 0}
+.refs h3,.drawer h3{margin:0 0 8px;font-size:13px;font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--nt-stroke);background:var(--nt-bg);border-radius:4px;padding:2px 8px;font:12px var(--mono)}
+.chip.undef{border-style:dashed;border-color:var(--warn);background:none;color:var(--warn)}
+.drawer{margin-top:24px}
+.card{margin:0 0 14px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);overflow:hidden}
+.card-h{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--rule)}
+.card-h b{font:600 13px var(--mono);flex:1;overflow-wrap:anywhere}
+.card-h .btn{padding:2px 8px;font-size:12px}
+.card .canvas{border:0;border-radius:0}
+.card pre.syntax{margin:8px 12px 0;font-size:11.5px}
+.notice{padding:14px 16px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);max-width:70ch}
+.notice p{margin:0 0 8px}
+.status{min-height:18px;margin:8px 0 0;color:var(--warn);font-size:13px}
+.uses{display:flex;flex-direction:column;gap:2px;margin-top:8px;align-items:flex-start}
+.ebnf{width:100%;min-height:60vh;box-sizing:border-box;font:12px/1.5 var(--mono);background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:12px;resize:vertical}
+
+.panel{display:none;position:fixed;inset:0;z-index:10;background:rgba(10,14,18,.55);align-items:center;justify-content:center;padding:20px}
+.panel.on{display:flex}
+.panel-box{width:min(720px,100%);background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:16px}
+.panel-box h2{margin:0 0 6px;font-size:16px}
+.panel-box textarea{width:100%;height:46vh;box-sizing:border-box;font:12px/1.5 var(--mono);background:var(--bg);border:1px solid var(--rule);border-radius:6px;padding:10px}
+
+svg.rr{display:block}
+.rr-line{fill:none;stroke:var(--line);stroke-width:1.6}
+.rr-dot{fill:var(--line)}
+.rr-end{fill:none;stroke:var(--line);stroke-width:2}
+.rr text{font:13px "ui-monospace",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;fill:var(--ink)}
+.rr-term rect{fill:var(--term-bg);stroke:var(--term-stroke);stroke-width:1.3}
+.rr-nt rect{fill:var(--nt-bg);stroke:var(--nt-stroke);stroke-width:1.3}
+.rr-nt{cursor:pointer}
+.rr-nt:hover rect{stroke-width:2.4}
+.rr-enum rect{fill:none;stroke:var(--enum-stroke);stroke-dasharray:4 3}
+.rr-enum text.rr-enum-title{fill:var(--muted);font-family:var(--sans);font-size:12px}
+
+@media (max-width:820px){
+  .app{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,40%) minmax(0,1fr)}
+  .side{border-right:0;border-bottom:1px solid var(--rule)}
+  .bar,.content{padding-left:14px;padding-right:14px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="side-head">
+      <h1>GAM syntax viewer</h1>
+      <p class="src" id="src"></p>
+      <div class="row">
+        <button class="btn primary" id="openBtn" type="button">Open GAM file</button>
+        <button class="btn" id="pasteBtn" type="button">Paste text</button>
+        <input type="file" id="file" hidden accept=".txt,.md,.bnf,.text,text/*">
+      </div>
+    </div>
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <input class="search" id="q" type="search" placeholder="Filter, e.g. print users" aria-label="Filter">
+    <div class="list" id="list"></div>
+  </aside>
+  <main class="main" id="main">
+    <div class="bar" id="bar"></div>
+    <div class="content" id="content"></div>
+  </main>
+</div>
+
+<div class="panel" id="panel" role="dialog" aria-modal="true" aria-label="Paste GAM syntax">
+  <div class="panel-box">
+    <h2>Paste the GAM syntax text</h2>
+    <p class="src">Everything stays in your browser.</p>
+    <textarea id="paste" spellcheck="false"></textarea>
+    <div class="row">
+      <button class="btn primary" id="pasteGo" type="button">Parse and view</button>
+      <button class="btn" id="pasteCancel" type="button">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+__CORE__
+</script>
+<script>
+(function () {
+  var SAMPLE = __SAMPLE__;
+  var KEY = 'gam-syntax-viewer-text';
+  var FONT = '13px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+  var mctx = document.createElement('canvas').getContext('2d'); mctx.font = FONT;
+  tw = function (s) { return mctx.measureText(s).width; };
+
+  var $ = function (s) { return document.querySelector(s); };
+  var doc, srcLabel, tab = 'cmd', sel = null, open = [], limit = 1000, zoom = 1, view = 'diagram', q = '', status = '', ebnfCache = null;
+
+  function load(text, label, save) {
+    doc = parseDoc(text); srcLabel = label; ebnfCache = null;
+    sel = doc.commands.length ? { t: 'cmd', id: 0 } : (doc.ruleOrder.length ? { t: 'rule', name: doc.ruleOrder[0] } : null);
+    open = []; view = 'diagram'; status = ''; q = ''; $('#q').value = '';
+    if (save) { try { localStorage.setItem(KEY, text); } catch (e) {} }
+    renderAll();
+  }
+
+  function pill(text) { return '<span class="x">' + esc(text) + '</span>'; }
+
+  function renderSide() {
+    var nIss = doc.issues.undef.length + doc.issues.dups.length + doc.issues.warnings.length;
+    $('#src').textContent = srcLabel + ': ' + doc.commands.length + ' commands, ' + doc.ruleOrder.length + ' rules';
+    var tabs = [['cmd', 'Commands', doc.commands.length], ['rule', 'Rules', doc.ruleOrder.length], ['iss', 'Issues', nIss]];
+    $('#tabs').innerHTML = tabs.map(function (t) {
+      return '<button class="tab" role="tab" data-tab="' + t[0] + '" aria-selected="' + (tab === t[0]) + '">' + t[1] +
+        '<span class="n' + (t[0] === 'iss' && t[2] ? ' bad' : '') + '">' + t[2] + '</span></button>';
+    }).join('');
+    $('#q').style.display = tab === 'iss' ? 'none' : '';
+    var h = '', terms = q.toLowerCase().split(/\s+/).filter(Boolean), cur = sel;
+    if (tab === 'cmd') {
+      var last = null, shown = 0;
+      doc.commands.forEach(function (c) {
+        var hay = (c.label + ' ' + c.text).toLowerCase();
+        if (terms.length && !terms.every(function (t) { return hay.indexOf(t) >= 0; })) return;
+        if (c.section !== last) { h += '<div class="grp">' + esc(c.section || 'Commands') + '</div>'; last = c.section; }
+        h += '<button class="item" data-cmd="' + c.id + '"' + (cur && cur.t === 'cmd' && cur.id === c.id ? ' aria-current="true"' : '') + '>' + esc(c.label) + '</button>';
+        shown++;
+      });
+      if (!shown) h = '<p class="issue-note">No commands match.</p>';
+    } else if (tab === 'rule') {
+      var names = doc.ruleOrder.slice().sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : 1; }), n2 = 0;
+      names.forEach(function (nm) {
+        if (terms.length && !terms.every(function (t) { return nm.toLowerCase().indexOf(t) >= 0; })) return;
+        var c = doc.rules[nm].length;
+        h += '<button class="item" data-rule="' + esc(nm) + '"' + (cur && cur.t === 'rule' && cur.name === nm ? ' aria-current="true"' : '') + '>' + esc('<' + nm + '>') + (c > 1 ? ' ' + pill('×' + c) : '') + '</button>';
+        n2++;
+      });
+      if (!n2) h = '<p class="issue-note">No rules match.</p>';
+    } else {
+      var I = doc.issues;
+      h += '<div class="issue-h">Used but never defined (' + I.undef.length + ')</div>';
+      h += '<p class="issue-note">These nonterminals appear on the right-hand side but have no rule. Strict tools reject that.</p>';
+      I.undef.forEach(function (u) {
+        h += '<button class="item" data-undef="' + esc(u.name) + '"' + (cur && cur.t === 'undef' && cur.name === u.name ? ' aria-current="true"' : '') + '>' + esc('<' + u.name + '>') + ' ' + pill('used ' + u.uses.length + '×') + '</button>';
+      });
+      h += '<div class="issue-h">Defined more than once (' + I.dups.length + ')</div>';
+      I.dups.forEach(function (d) {
+        h += '<button class="item" data-rule="' + esc(d.name) + '">' + esc('<' + d.name + '>') + ' ' + pill(d.count + ' definitions' + (d.identical ? ', identical' : ', different')) + '</button>';
+      });
+      h += '<div class="issue-h">Bracket problems (' + I.warnings.length + ')</div>';
+      I.warnings.forEach(function (w) {
+        if (w.kind === 'cmd') h += '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + ' ' + pill(w.msg) + '</button>';
+        else h += '<button class="item" data-rule="' + esc(w.name) + '">' + esc('<' + w.name + '>') + ' ' + pill(w.msg) + '</button>';
+      });
+    }
+    $('#list').innerHTML = h;
+  }
+
+  function diagramHTML(ast) {
+    var r = renderSVG(ast, limit / zoom);
+    return '<div class="canvas"><div data-w="' + Math.round(r.w) + '" data-h="' + Math.round(r.h) + '">' + r.svg + '</div></div>';
+  }
+  function applyZoom() {
+    document.querySelectorAll('.canvas > div').forEach(function (d) {
+      var s = d.firstChild, w = +d.dataset.w * zoom, h = +d.dataset.h * zoom;
+      s.style.width = w + 'px'; s.style.height = h + 'px';
+    });
+  }
+  function nts(ast) { var seen = {}, out = []; walkNT(ast, function (v) { if (!seen[v]) { seen[v] = 1; out.push(v); } }); return out; }
+
+  function renderBar() {
+    var h = '';
+    if (view === 'ebnf') {
+      h = '<button class="btn" data-view="diagram" type="button">Back to diagrams</button><span class="sp"></span>';
+    } else {
+      h = '<label>Wrap at <input type="range" id="wrap" min="500" max="3000" step="50" value="' + limit + '" aria-label="Wrap width"><span id="wrapv">' + limit + '</span></label>' +
+        '<span class="zoom"><button class="btn" data-zoom="-" type="button" aria-label="Zoom out">−</button><span id="zv">' + Math.round(zoom * 100) + '%</span><button class="btn" data-zoom="+" type="button" aria-label="Zoom in">+</button></span>' +
+        '<span class="sp"></span><button class="btn" data-view="ebnf" type="button">Cleaned EBNF</button>';
+    }
+    $('#bar').innerHTML = h;
+  }
+
+  function renderContent() {
+    var el = $('#content'), h = '';
+    if (view === 'ebnf') {
+      if (ebnfCache === null) ebnfCache = docToEBNF(doc);
+      el.innerHTML = '<h2>Cleaned EBNF</h2><p class="meta">W3C-style grammar generated from the whole file. Missing rules are stubbed so it compiles. Paste it into a railroad generator or parser.</p>' +
+        '<div class="row" style="margin:0 0 10px"><button class="btn primary" id="copyE" type="button">Copy to clipboard</button></div>' +
+        '<textarea class="ebnf" id="ebnfText" readonly spellcheck="false"></textarea>';
+      $('#ebnfText').value = ebnfCache;
+      return;
+    }
+    if (!sel) { el.innerHTML = '<div class="notice"><p>Nothing to show yet.</p><p>Open your GAM file or paste its text. Lines that start with gam become commands, and lines like &lt;Name&gt; ::= define rules.</p></div>'; return; }
+    var ast = null;
+    if (sel.t === 'cmd') {
+      var c = doc.commands[sel.id];
+      h += '<h2>' + esc(c.label) + '</h2><p class="meta">' + esc(c.section || 'Commands') + ', line ' + c.line + '</p>';
+      h += '<pre class="syntax">' + esc(c.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + diagramHTML(c.ast); ast = c.ast;
+    } else if (sel.t === 'rule') {
+      var defs = doc.rules[sel.name];
+      h += '<h2>' + esc('<' + sel.name + '>') + '</h2><p class="meta">' + esc(defs[0].sub || defs[0].section || 'Rule') + ', line ' + defs[0].line + (defs.length > 1 ? '. Defined ' + defs.length + ' times.' : '') + '</p>';
+      defs.forEach(function (d, i) {
+        if (defs.length > 1) h += '<div class="def-h">Definition ' + (i + 1) + ' of ' + defs.length + ', line ' + d.line + '</div>';
+        h += '<pre class="syntax">' + esc(d.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + diagramHTML(d.ast);
+      });
+      ast = { t: 'seq', items: defs.map(function (d) { return d.ast; }) };
+    } else {
+      var u = doc.issues.undef.filter(function (x) { return x.name === sel.name; })[0];
+      h += '<h2>' + esc('<' + sel.name + '>') + '</h2><p class="meta">Referenced but never defined</p><div class="notice"><p>Add a rule for this name, or remove the reference, so a strict parser can compile the grammar.</p><p>Used in:</p><div class="uses">';
+      (u ? u.uses : []).slice(0, 40).forEach(function (w) {
+        h += w.kind === 'cmd' ? '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + '</button>' : '<button class="item" data-rule="' + esc(w.name) + '">' + esc('<' + w.name + '>') + '</button>';
+      });
+      h += '</div></div>';
+    }
+    if (ast) {
+      var ns = nts(ast);
+      if (ns.length) {
+        h += '<div class="refs"><h3>Rules used here</h3><div class="chips">' + ns.map(function (n) {
+          return '<button class="chip' + (doc.rules[n] ? '' : ' undef') + '" data-open="' + esc(n) + '" title="' + (doc.rules[n] ? 'Show this rule below' : 'Never defined in this file') + '">' + esc(n) + '</button>';
+        }).join('') + '</div></div>';
+      }
+    }
+    h += '<div class="status" id="status" role="status">' + esc(status) + '</div>';
+    if (open.length) {
+      h += '<div class="drawer"><h3>Opened rules</h3>';
+      open.forEach(function (n) {
+        var defs = doc.rules[n];
+        h += '<div class="card"><div class="card-h"><b>' + esc('<' + n + '>') + '</b><button class="btn" data-rule="' + esc(n) + '" type="button">Open as main</button><button class="btn" data-close="' + esc(n) + '" type="button">Close</button></div>';
+        defs.forEach(function (d) { h += '<pre class="syntax">' + esc(d.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + diagramHTML(d.ast); });
+        h += '</div>';
+      });
+      h += '</div>';
+    }
+    el.innerHTML = h;
+    applyZoom();
+  }
+
+  function renderAll() { renderSide(); renderBar(); renderContent(); }
+
+  function openRule(name) {
+    if (!doc.rules[name]) { status = '“' + name + '” isn’t defined in this file.'; renderContent(); return; }
+    status = '';
+    open = open.filter(function (n) { return n !== name; }); open.unshift(name); open = open.slice(0, 6);
+    renderContent();
+    var card = document.querySelector('.card'); if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target, b;
+    if ((b = t.closest('[data-tab]'))) { tab = b.dataset.tab; renderSide(); return; }
+    if ((b = t.closest('[data-cmd]'))) { sel = { t: 'cmd', id: +b.dataset.cmd }; open = []; view = 'diagram'; status = ''; renderAll(); $('#main').scrollTop = 0; return; }
+    if ((b = t.closest('[data-rule]'))) { sel = { t: 'rule', name: b.dataset.rule }; open = []; view = 'diagram'; status = ''; renderAll(); $('#main').scrollTop = 0; return; }
+    if ((b = t.closest('[data-undef]'))) { sel = { t: 'undef', name: b.dataset.undef }; view = 'diagram'; renderAll(); return; }
+    if ((b = t.closest('[data-open]'))) { openRule(b.dataset.open); return; }
+    if ((b = t.closest('.rr-nt'))) { openRule(b.getAttribute('data-nt')); return; }
+    if ((b = t.closest('[data-close]'))) { open = open.filter(function (n) { return n !== b.dataset.close; }); renderContent(); return; }
+    if ((b = t.closest('[data-view]'))) { view = b.dataset.view; renderBar(); renderContent(); return; }
+    if ((b = t.closest('[data-zoom]'))) {
+      zoom = Math.min(2, Math.max(0.4, zoom + (b.dataset.zoom === '+' ? 0.1 : -0.1)));
+      renderBar(); renderContent(); return;
+    }
+    if (t.id === 'copyE') {
+      var ta = $('#ebnfText'); ta.focus(); ta.select();
+      try { navigator.clipboard.writeText(ta.value).then(function () { t.textContent = 'Copied'; }, function () { document.execCommand('copy'); t.textContent = 'Copied'; }); }
+      catch (err) { try { document.execCommand('copy'); t.textContent = 'Copied'; } catch (e2) { t.textContent = 'Press Ctrl+C to copy'; } }
+    }
+  });
+  document.addEventListener('input', function (e) {
+    if (e.target.id === 'q') { q = e.target.value; renderSide(); }
+    if (e.target.id === 'wrap') { limit = +e.target.value; $('#wrapv').textContent = limit; clearTimeout(load.t); load.t = setTimeout(renderContent, 120); }
+  });
+
+  $('#openBtn').addEventListener('click', function () { $('#file').click(); });
+  $('#file').addEventListener('change', function (e) { readFile(e.target.files[0]); e.target.value = ''; });
+  function readFile(file) {
+    if (!file) return;
+    var r = new FileReader();
+    r.onload = function () { load(String(r.result), file.name, true); };
+    r.readAsText(file);
+  }
+  window.addEventListener('dragover', function (e) { e.preventDefault(); });
+  window.addEventListener('drop', function (e) { e.preventDefault(); if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]); });
+  $('#pasteBtn').addEventListener('click', function () { $('#panel').classList.add('on'); $('#paste').focus(); });
+  $('#pasteCancel').addEventListener('click', function () { $('#panel').classList.remove('on'); });
+  $('#pasteGo').addEventListener('click', function () {
+    var v = $('#paste').value; if (!v.trim()) return;
+    $('#panel').classList.remove('on'); load(v, 'Pasted text', true);
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') $('#panel').classList.remove('on'); });
+
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  if (saved && saved.length > 200) load(saved, 'Your file (remembered in this browser)', false);
+  else load(SAMPLE, 'Sample excerpt, open your file to see everything', false);
+})();
+</script>
+</body>
+</html>

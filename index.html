@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GAM syntax viewer</title>
+<style>
+:root{
+  --bg:#eef1f4; --panel:#fbfcfd; --ink:#18222c; --muted:#5a6a78; --rule:#d3dae1; --hover:#e6ebf0; --sel:#dfe7fb;
+  --accent:#2547c9; --warn:#a4380f; --line:#334455;
+  --term-bg:#fff2cf; --term-stroke:#b7841c; --nt-bg:#e3e9fc; --nt-stroke:#4a63c7; --enum-stroke:#8a97a4;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  color-scheme:light;
+  box-sizing:border-box; padding-top:env(safe-area-inset-top,0px); padding-bottom:env(safe-area-inset-bottom,0px);
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --bg:#10151b; --panel:#171e26; --ink:#e4eaf0; --muted:#93a3b2; --rule:#29333e; --hover:#202a35; --sel:#1f2d52;
+    --accent:#8ea6ff; --warn:#ff9a6b; --line:#8da1b3;
+    --term-bg:#3a3015; --term-stroke:#c99a2e; --nt-bg:#1c2850; --nt-stroke:#6f8cff; --enum-stroke:#6b7a88;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#10151b; --panel:#171e26; --ink:#e4eaf0; --muted:#93a3b2; --rule:#29333e; --hover:#202a35; --sel:#1f2d52;
+  --accent:#8ea6ff; --warn:#ff9a6b; --line:#8da1b3;
+  --term-bg:#3a3015; --term-stroke:#c99a2e; --nt-bg:#1c2850; --nt-stroke:#6f8cff; --enum-stroke:#6b7a88;
+  color-scheme:dark;
+}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.45 var(--sans)}
+button,input,textarea{font:inherit;color:inherit}
+button{cursor:pointer}
+:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+.app{display:grid;grid-template-columns:330px minmax(0,1fr);height:100%}
+.side{display:flex;flex-direction:column;min-height:0;background:var(--panel);border-right:1px solid var(--rule)}
+.side-head{padding:16px 16px 10px}
+.side-head h1{margin:0 0 2px;font-size:17px;font-weight:650;letter-spacing:-.01em}
+.src{margin:0;color:var(--muted);font-size:12.5px}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.btn{border:1px solid var(--rule);background:var(--panel);border-radius:6px;padding:5px 10px;font-size:13px}
+.btn:hover{background:var(--hover)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+:root[data-theme="dark"] .btn.primary{color:#10151b}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn.primary{color:#10151b}}
+.tabs{display:flex;border-bottom:1px solid var(--rule);padding:0 8px}
+.tab{background:none;border:0;border-bottom:2px solid transparent;padding:8px 10px;color:var(--muted);font-size:13px}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
+.tab .n{color:var(--muted);font-weight:400;margin-left:4px}
+.tab .n.bad{color:var(--warn);font-weight:600}
+.search{margin:10px 12px 6px;border:1px solid var(--rule);background:var(--bg);border-radius:6px;padding:6px 9px;width:calc(100% - 24px);box-sizing:border-box}
+.list{flex:1;min-height:0;overflow:auto;padding:0 6px 14px}
+.grp{margin:12px 8px 4px;color:var(--muted);font-size:12px;font-weight:600}
+.item{display:block;width:100%;text-align:left;border:0;background:none;padding:4px 8px;border-radius:5px;font-family:var(--mono);font-size:12px;line-height:1.35;overflow-wrap:anywhere}
+.item:hover{background:var(--hover)}
+.item[aria-current="true"]{background:var(--sel)}
+.item .x{color:var(--muted)}
+.issue-h{margin:14px 8px 4px;font-size:13px;font-weight:600}
+.issue-note{margin:2px 8px 6px;color:var(--muted);font-size:12.5px}
+
+.main{display:flex;flex-direction:column;min-width:0;min-height:0;overflow:auto}
+.bar{position:sticky;top:0;z-index:2;display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 20px;background:var(--bg);border-bottom:1px solid var(--rule)}
+.bar label{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px}
+.bar input[type=range]{width:130px}
+.bar .sp{flex:1}
+.zoom{display:flex;align-items:center;gap:4px;color:var(--muted);font-size:13px}
+.zoom .btn{padding:3px 9px}
+.content{padding:20px 20px 40px;max-width:100%}
+.content h2{margin:0;font-family:var(--mono);font-size:16px;font-weight:600;overflow-wrap:anywhere}
+.meta{margin:4px 0 12px;color:var(--muted);font-size:13px}
+pre.syntax{margin:0 0 16px;padding:10px 12px;background:var(--panel);border:1px solid var(--rule);border-radius:6px;font:12px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+.canvas{overflow-x:auto;background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:6px}
+.def-h{margin:14px 0 6px;color:var(--muted);font-size:13px}
+.refs{margin:18px 0 0}
+.refs h3,.drawer h3{margin:0 0 8px;font-size:13px;font-weight:600}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{border:1px solid var(--nt-stroke);background:var(--nt-bg);border-radius:4px;padding:2px 8px;font:12px var(--mono)}
+.chip.undef{border-style:dashed;border-color:var(--warn);background:none;color:var(--warn)}
+.drawer{margin-top:24px}
+.card{margin:0 0 14px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);overflow:hidden}
+.card-h{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid var(--rule)}
+.card-h b{font:600 13px var(--mono);flex:1;overflow-wrap:anywhere}
+.card-h .btn{padding:2px 8px;font-size:12px}
+.card .canvas{border:0;border-radius:0}
+.card pre.syntax{margin:8px 12px 0;font-size:11.5px}
+.notice{padding:14px 16px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);max-width:70ch}
+.notice p{margin:0 0 8px}
+.status{min-height:18px;margin:8px 0 0;color:var(--warn);font-size:13px}
+.uses{display:flex;flex-direction:column;gap:2px;margin-top:8px;align-items:flex-start}
+.ebnf{width:100%;min-height:60vh;box-sizing:border-box;font:12px/1.5 var(--mono);background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:12px;resize:vertical}
+
+.panel{display:none;position:fixed;inset:0;z-index:10;background:rgba(10,14,18,.55);align-items:center;justify-content:center;padding:20px}
+.panel.on{display:flex}
+.panel-box{width:min(720px,100%);background:var(--panel);border:1px solid var(--rule);border-radius:10px;padding:16px}
+.panel-box h2{margin:0 0 6px;font-size:16px}
+.panel-box textarea{width:100%;height:46vh;box-sizing:border-box;font:12px/1.5 var(--mono);background:var(--bg);border:1px solid var(--rule);border-radius:6px;padding:10px}
+
+svg.rr{display:block}
+.rr-line{fill:none;stroke:var(--line);stroke-width:1.6}
+.rr-dot{fill:var(--line)}
+.rr-end{fill:none;stroke:var(--line);stroke-width:2}
+.rr text{font:13px "ui-monospace",SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;fill:var(--ink)}
+.rr-term rect{fill:var(--term-bg);stroke:var(--term-stroke);stroke-width:1.3}
+.rr-nt rect{fill:var(--nt-bg);stroke:var(--nt-stroke);stroke-width:1.3}
+.rr-nt{cursor:pointer}
+.rr-nt:hover rect{stroke-width:2.4}
+.rr-enum rect{fill:none;stroke:var(--enum-stroke);stroke-dasharray:4 3}
+.rr-enum text.rr-enum-title{fill:var(--muted);font-family:var(--sans);font-size:12px}
+
+@media (max-width:820px){
+  .app{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,40%) minmax(0,1fr)}
+  .side{border-right:0;border-bottom:1px solid var(--rule)}
+  .bar,.content{padding-left:14px;padding-right:14px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="side-head">
+      <h1>GAM syntax viewer</h1>
+      <p class="src" id="src"></p>
+      <div class="row">
+        <button class="btn primary" id="openBtn" type="button">Open GAM file</button>
+        <button class="btn" id="pasteBtn" type="button">Paste text</button>
+        <input type="file" id="file" hidden accept=".txt,.md,.bnf,.text,text/*">
+      </div>
+    </div>
+    <div class="tabs" role="tablist" id="tabs"></div>
+    <input class="search" id="q" type="search" placeholder="Filter, e.g. print users" aria-label="Filter">
+    <div class="list" id="list"></div>
+  </aside>
+  <main class="main" id="main">
+    <div class="bar" id="bar"></div>
+    <div class="content" id="content"></div>
+  </main>
+</div>
+
+<div class="panel" id="panel" role="dialog" aria-modal="true" aria-label="Paste GAM syntax">
+  <div class="panel-box">
+    <h2>Paste the GAM syntax text</h2>
+    <p class="src">Everything stays in your browser.</p>
+    <textarea id="paste" spellcheck="false"></textarea>
+    <div class="row">
+      <button class="btn primary" id="pasteGo" type="button">Parse and view</button>
+      <button class="btn" id="pasteCancel" type="button">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ===== GAM BNF core: tokenizer, parser, railroad layout, EBNF export ===== */
+var tw = function (s) { return s.length * 7.6; }; // replaced by canvas measure in the browser
+
+var NT_RE = /^<[A-Za-z][A-Za-z0-9_\/ .\-]*>/;
+var META = '[]()|*+';
+
+function tokenize(s) {
+  var toks = [], i = 0, n = s.length;
+  function ws(ch) { return ch === undefined || /\s/.test(ch); }
+  while (i < n) {
+    var c = s[i];
+    if (/\s/.test(c)) { i++; continue; }
+    var sp = i === 0 || /\s/.test(s[i - 1]);
+    if (META.indexOf(c) >= 0) {
+      toks.push({ k: c, sp: sp, nsp: ws(s[i + 1]) });
+      i++; continue;
+    }
+    if (c === '<') {
+      var m = NT_RE.exec(s.slice(i, i + 120));
+      if (m) {
+        toks.push({ k: 'nt', v: m[0].slice(1, -1).trim(), sp: sp, nsp: ws(s[i + m[0].length]) });
+        i += m[0].length; continue;
+      }
+    }
+    if (c === '"' || c === "'") {
+      var nx = s[i + 1], pv = s[i - 1];
+      if (nx === '<' || nx === '(' ||
+          (pv && '*)>+'.indexOf(pv) >= 0 && (nx === undefined || /\s/.test(nx) || '|)]'.indexOf(nx) >= 0))) {
+        i++; continue; // quote that merely wraps a list expression
+      }
+    }
+    var j = i;
+    while (j < n && !/\s/.test(s[j]) && META.indexOf(s[j]) < 0 &&
+           !(s[j] === '<' && NT_RE.test(s.slice(j, j + 120)))) j++;
+    if (j === i) j = i + 1;
+    toks.push({ k: 'w', v: s.slice(i, j), sp: sp, nsp: ws(s[j]) });
+    i = j;
+  }
+  return toks;
+}
+
+function mkSeq(items) {
+  if (!items.length) return null;
+  return items.length === 1 ? items[0] : { t: 'seq', items: items };
+}
+function mkChoice(items) {
+  items = items.filter(Boolean);
+  if (!items.length) return null;
+  return items.length === 1 ? items[0] : { t: 'choice', items: items };
+}
+
+function parseExpr(s, warn) {
+  var toks = tokenize(s), p = 0;
+  warn = warn || function () {};
+  function parseItem() {
+    var t = toks[p], node;
+    if (t.k === '[') {
+      p++;
+      var inner = parseAlts(1);
+      if (toks[p] && toks[p].k === ']') p++; else warn('missing ]');
+      node = { t: 'opt', item: inner || { t: 'seq', items: [] } };
+    } else if (t.k === '(') {
+      p++;
+      var g = parseAlts(1);
+      if (toks[p] && toks[p].k === ')') p++; else warn('missing )');
+      node = g || { t: 'seq', items: [] };
+    } else if (t.k === 'nt') {
+      node = { t: 'nt', v: t.v }; p++;
+    } else {
+      node = { t: 'term', v: t.v || t.k }; p++;
+    }
+    while (p < toks.length && (toks[p].k === '*' || toks[p].k === '+') && !toks[p].sp) {
+      node = { t: toks[p].k === '*' ? 'star' : 'plus', item: node }; p++;
+    }
+    return node;
+  }
+  function parseTight() {
+    var first = parseItem(), opts = [first];
+    while (p + 1 < toks.length && toks[p].k === '|' && !toks[p].sp && !toks[p].nsp &&
+           toks[p + 1].k !== ')' && toks[p + 1].k !== ']' && toks[p + 1].k !== '|') {
+      p++; opts.push(parseItem());
+    }
+    return opts.length > 1 ? { t: 'choice', items: opts } : first;
+  }
+  function parseAlts(depth) {
+    var alts = [], seq = [];
+    while (p < toks.length) {
+      var t = toks[p];
+      if (t.k === ')' || t.k === ']') {
+        if (depth > 0) break;
+        warn('unmatched ' + t.k);
+        seq.push({ t: 'term', v: t.k }); p++; continue;
+      }
+      if (t.k === '|') { alts.push(mkSeq(seq)); seq = []; p++; continue; }
+      seq.push(parseTight());
+    }
+    alts.push(mkSeq(seq));
+    return mkChoice(alts);
+  }
+  return parseAlts(0) || { t: 'seq', items: [] };
+}
+
+function walkNT(n, fn) {
+  if (!n) return;
+  if (n.t === 'nt') fn(n.v);
+  else if (n.items) n.items.forEach(function (c) { walkNT(c, fn); });
+  else if (n.item) walkNT(n.item, fn);
+}
+
+function cleanLine(ln) {
+  // drop trailing "# comment" but keep hex colours such as #1c4587
+  return ln.replace(/\s+#(?![0-9a-fA-F]{6}(?:\||\s|$)).*$/, '');
+}
+
+function cmdLabel(ast, text) {
+  var items = ast.t === 'seq' ? ast.items : [ast], out = [];
+  for (var i = 0; i < items.length && out.length < 7; i++) {
+    var c = items[i];
+    if (c.t === 'term') out.push(c.v);
+    else if (c.t === 'choice' && c.items.every(function (x) { return x.t === 'term'; })) out.push(c.items.map(function (x) { return x.v; }).join('|'));
+    else if (c.t === 'nt' && i > 0 && i < 4) out.push('<' + c.v + '>');
+    else break;
+  }
+  return out.join(' ') || text.slice(0, 40);
+}
+
+function parseDoc(text) {
+  var lines = text.replace(/\r/g, '').split('\n');
+  var rules = {}, ruleOrder = [], commands = [], issues = { warnings: [] };
+  var section = '', sub = '', cur = null;
+
+  function flush() {
+    if (!cur) return;
+    var body = cur.lines.join('\n').trim();
+    var warns = [];
+    var ast = parseExpr(body, function (w) { warns.push(w); });
+    if (cur.kind === 'rule') {
+      if (!rules[cur.name]) { rules[cur.name] = []; ruleOrder.push(cur.name); }
+      rules[cur.name].push({ ast: ast, text: body, section: cur.section, sub: cur.sub, line: cur.line });
+      warns.forEach(function (w) { issues.warnings.push({ kind: 'rule', name: cur.name, msg: w }); });
+    } else {
+      var id = commands.length;
+      commands.push({ id: id, label: cmdLabel(ast, body), text: body, ast: ast, section: cur.section, line: cur.line, warns: warns });
+      warns.forEach(function (w) { issues.warnings.push({ kind: 'cmd', id: id, msg: w }); });
+    }
+    cur = null;
+  }
+
+  for (var li = 0; li < lines.length; li++) {
+    var ln = lines[li], m;
+    if ((m = /^(#{1,3}) (\S.*)$/.exec(ln))) {
+      flush();
+      if (m[1].length === 1) { section = m[2].trim(); sub = ''; } else sub = m[2].trim();
+      continue;
+    }
+    if (/^#/.test(ln)) continue; // commented-out line, keep current block
+    if (/^\s*$/.test(ln)) { flush(); continue; }
+    if ((m = /^<([A-Za-z][^<>]*)>\s*:{0,2}=\s*(.*)$/.exec(ln))) {
+      flush();
+      cur = { kind: 'rule', name: m[1].trim(), lines: [cleanLine(m[2])], section: section, sub: sub, line: li + 1 };
+      continue;
+    }
+    if (/^(gam|stam)(\s|$)/.test(ln)) {
+      flush();
+      cur = { kind: 'cmd', lines: [cleanLine(ln)], section: section, line: li + 1 };
+      continue;
+    }
+    if (/^\s+\S/.test(ln)) {
+      if (cur && !/^\s*(See:|Must match|Maximum of)/.test(ln)) cur.lines.push(cleanLine(ln));
+      continue;
+    }
+    flush(); // unindented prose
+  }
+  flush();
+
+  var refs = {}, dups = [];
+  function note(name, where) { (refs[name] = refs[name] || []).push(where); }
+  ruleOrder.forEach(function (name) {
+    rules[name].forEach(function (d) { walkNT(d.ast, function (v) { note(v, { kind: 'rule', name: name }); }); });
+    var uniq = {};
+    rules[name].forEach(function (d) { uniq[d.text.replace(/\s+/g, ' ')] = 1; });
+    if (rules[name].length > 1) dups.push({ name: name, count: rules[name].length, identical: Object.keys(uniq).length === 1 });
+  });
+  commands.forEach(function (c) { walkNT(c.ast, function (v) { note(v, { kind: 'cmd', id: c.id }); }); });
+  var undef = Object.keys(refs).filter(function (v) { return !rules[v]; })
+    .map(function (v) { return { name: v, uses: refs[v] }; })
+    .sort(function (a, b) { return b.uses.length - a.uses.length; });
+  issues.undef = undef; issues.dups = dups;
+  return { rules: rules, ruleOrder: ruleOrder, commands: commands, issues: issues };
+}
+
+/* ===== railroad layout ===== */
+var GAP = 14, R = 10;
+function f(n) { return Math.round(n * 10) / 10; }
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function hline(x1, x2, y) { return x2 > x1 ? 'M' + f(x1) + ' ' + f(y) + 'H' + f(x2) : ''; }
+
+function nSkip() { return { w: 0, up: 0, down: 0, path: function () { return ''; }, draw: function () { return ''; } }; }
+
+function nTerm(v) {
+  var w = Math.max(26, tw(v) + 22);
+  return { w: w, up: 13, down: 13, kind: 'term', v: v,
+    path: function () { return ''; },
+    draw: function (x, y) {
+      return '<g class="rr-term"><rect x="' + f(x) + '" y="' + f(y - 13) + '" width="' + f(w) + '" height="26" rx="13"/>' +
+        '<text x="' + f(x + w / 2) + '" y="' + f(y + 4.5) + '" text-anchor="middle">' + esc(v) + '</text></g>';
+    } };
+}
+function nNT(v) {
+  var w = Math.max(26, tw(v) + 22);
+  return { w: w, up: 13, down: 13, kind: 'nt', v: v,
+    path: function () { return ''; },
+    draw: function (x, y) {
+      return '<g class="rr-nt" data-nt="' + esc(v) + '"><rect x="' + f(x) + '" y="' + f(y - 13) + '" width="' + f(w) + '" height="26" rx="3"/>' +
+        '<text x="' + f(x + w / 2) + '" y="' + f(y + 4.5) + '" text-anchor="middle">' + esc(v) + '</text></g>';
+    } };
+}
+
+function nSeq(items) {
+  if (!items.length) return { w: 20, up: 0, down: 0, path: function (x, y) { return hline(x, x + 20, y); }, draw: function () { return ''; } };
+  if (items.length === 1) return items[0];
+  var w = items.reduce(function (a, c) { return a + c.w; }, 0) + GAP * (items.length - 1);
+  return { w: w,
+    up: Math.max.apply(null, items.map(function (c) { return c.up; })),
+    down: Math.max.apply(null, items.map(function (c) { return c.down; })),
+    path: function (x, y) {
+      var d = '', cx = x;
+      items.forEach(function (c, i) {
+        d += c.path(cx, y); cx += c.w;
+        if (i < items.length - 1) { d += hline(cx, cx + GAP, y); cx += GAP; }
+      });
+      return d;
+    },
+    draw: function (x, y) {
+      var s = '', cx = x;
+      items.forEach(function (c, i) { s += c.draw(cx, y); cx += c.w + GAP; });
+      return s;
+    } };
+}
+
+function nChoice(items) {
+  var iw = Math.max.apply(null, items.map(function (c) { return c.w; })), w = iw + 40, off = [0];
+  for (var i = 1; i < items.length; i++) off.push(off[i - 1] + items[i - 1].down + 10 + items[i].up);
+  return { w: w, up: items[0].up, down: off[off.length - 1] + items[items.length - 1].down,
+    path: function (x, y) {
+      var d = '';
+      items.forEach(function (c, i) {
+        var yy = y + off[i];
+        if (i === 0) d += hline(x, x + 20, y) + hline(x + 20 + c.w, x + w, y);
+        else {
+          d += 'M' + f(x) + ' ' + f(y) + 'a' + R + ' ' + R + ' 0 0 1 ' + R + ' ' + R + 'V' + f(yy - R) + 'a' + R + ' ' + R + ' 0 0 0 ' + R + ' ' + R;
+          d += 'M' + f(x + w) + ' ' + f(y) + 'a' + R + ' ' + R + ' 0 0 0 -' + R + ' ' + R + 'V' + f(yy - R) + 'a' + R + ' ' + R + ' 0 0 1 -' + R + ' ' + R;
+          d += hline(x + 20 + c.w, x + w - 20, yy);
+        }
+        d += c.path(x + 20, yy);
+      });
+      return d;
+    },
+    draw: function (x, y) {
+      var s = '';
+      items.forEach(function (c, i) { s += c.draw(x + 20, y + off[i]); });
+      return s;
+    } };
+}
+
+function nLoop(item) {
+  var w = item.w + 40, ret = item.down + 18;
+  return { w: w, up: item.up, down: ret,
+    path: function (x, y) {
+      var ry = y + ret;
+      return hline(x, x + 20, y) + hline(x + 20 + item.w, x + w, y) + item.path(x + 20, y) +
+        'M' + f(x + 10) + ' ' + f(y) + 'a' + R + ' ' + R + ' 0 0 0 -' + R + ' ' + R + 'V' + f(ry - R) +
+        'a' + R + ' ' + R + ' 0 0 0 ' + R + ' ' + R + 'H' + f(x + w - R) +
+        'a' + R + ' ' + R + ' 0 0 0 ' + R + ' -' + R + 'V' + f(y + R) + 'a' + R + ' ' + R + ' 0 0 0 -' + R + ' -' + R;
+    },
+    draw: function (x, y) { return item.draw(x + 20, y); } };
+}
+
+function nStack(rows) {
+  var maxw = Math.max.apply(null, rows.map(function (r) { return r.w; })), W = maxw + 40, ys = [0];
+  for (var i = 1; i < rows.length; i++) {
+    var mid = ys[i - 1] + Math.max(rows[i - 1].down + 10, 20);
+    ys.push(mid + Math.max(20, rows[i].up + 10));
+  }
+  return { w: W, up: rows[0].up, down: ys[ys.length - 1] + rows[rows.length - 1].down,
+    path: function (x, y) {
+      var d = hline(x, x + 20, y);
+      rows.forEach(function (r, i) {
+        var a = y + ys[i];
+        d += r.path(x + 20, a);
+        if (i < rows.length - 1) {
+          var b = y + ys[i + 1], mid = a + Math.max(r.down + 10, 20);
+          d += hline(x + 20 + r.w, x + W - R, a);
+          d += 'M' + f(x + W - R) + ' ' + f(a) + 'a' + R + ' ' + R + ' 0 0 1 ' + R + ' ' + R + 'V' + f(mid - R) +
+            'a' + R + ' ' + R + ' 0 0 1 -' + R + ' ' + R + 'H' + f(x + R) +
+            'a' + R + ' ' + R + ' 0 0 0 -' + R + ' ' + R + 'V' + f(b - R) +
+            'a' + R + ' ' + R + ' 0 0 0 ' + R + ' ' + R + 'H' + f(x + 20);
+        } else d += hline(x + 20 + r.w, x + W, a);
+      });
+      return d;
+    },
+    draw: function (x, y) {
+      return rows.map(function (r, i) { return r.draw(x + 20, y + ys[i]); }).join('');
+    } };
+}
+
+function nEnum(words, maxw) {
+  var lines = [], line = '', lw = 0, sep = 14;
+  words.forEach(function (wd) {
+    var ww = tw(wd);
+    if (line && lw + sep + ww > maxw) { lines.push(line); line = ''; lw = 0; }
+    line += (line ? '   ' : '') + wd; lw += (lw ? sep : 0) + ww;
+  });
+  if (line) lines.push(line);
+  var wmax = Math.max.apply(null, lines.map(tw).concat([tw('one of ' + words.length)])), W = wmax + 28, H = (lines.length + 1) * 17 + 14;
+  return { w: W, up: H / 2, down: H / 2, path: function () { return ''; },
+    draw: function (x, y) {
+      var s = '<g class="rr-enum"><rect x="' + f(x) + '" y="' + f(y - H / 2) + '" width="' + f(W) + '" height="' + f(H) + '" rx="8"/>' +
+        '<text class="rr-enum-title" x="' + f(x + 14) + '" y="' + f(y - H / 2 + 20) + '">one of ' + words.length + '</text>';
+      lines.forEach(function (l, i) {
+        s += '<text x="' + f(x + 14) + '" y="' + f(y - H / 2 + 20 + (i + 1) * 17) + '" xml:space="preserve">' + esc(l) + '</text>';
+      });
+      return s + '</g>';
+    } };
+}
+
+function build(ast, limit) {
+  limit = Math.max(limit, 240);
+  switch (ast.t) {
+    case 'term': return nTerm(ast.v);
+    case 'nt': return nNT(ast.v);
+    case 'seq': {
+      var kids = ast.items.map(function (c) { return build(c, limit); });
+      if (!kids.length) return nSeq([]);
+      var total = kids.reduce(function (a, c) { return a + c.w; }, 0) + GAP * (kids.length - 1);
+      if (total <= limit || kids.length < 2) return nSeq(kids);
+      var rows = [], row = [], rw = 0, room = limit - 40;
+      kids.forEach(function (c) {
+        var add = c.w + (row.length ? GAP : 0);
+        if (row.length && rw + add > room) { rows.push(nSeq(row)); row = []; rw = 0; add = c.w; }
+        row.push(c); rw += add;
+      });
+      if (row.length) rows.push(nSeq(row));
+      return rows.length > 1 ? nStack(rows) : rows[0];
+    }
+    case 'choice': {
+      var its = ast.items;
+      if (its.length >= 12 && its.every(function (c) { return c.t === 'term'; }))
+        return nEnum(its.map(function (c) { return c.v; }), Math.min(limit - 80, 640));
+      return nChoice(its.map(function (c) { return build(c, limit - 60); }));
+    }
+    case 'opt': {
+      var inner = ast.item;
+      if (inner.t === 'seq' && !inner.items.length) return nSeq([]);
+      var alts = inner.t === 'choice' && !(inner.items.length >= 12) ? inner.items : [inner];
+      return nChoice([nSkip()].concat(alts.map(function (c) { return build(c, limit - 60); })));
+    }
+    case 'plus': return nLoop(build(ast.item, limit - 60));
+    case 'star': return nChoice([nSkip(), nLoop(build(ast.item, limit - 60))]);
+  }
+  return nSeq([]);
+}
+
+function renderSVG(ast, limit) {
+  var node = build(ast, limit), pad = 14, lead = 22;
+  var W = node.w + 2 * (pad + lead), H = node.up + node.down + 2 * pad, y = pad + node.up, x = pad + lead;
+  var d = hline(pad, x, y) + node.path(x, y) + hline(x + node.w, W - pad, y);
+  return { w: W, h: H, svg:
+    '<svg xmlns="http://www.w3.org/2000/svg" class="rr" viewBox="0 0 ' + f(W) + ' ' + f(H) + '" width="' + f(W) + '" height="' + f(H) + '">' +
+    '<path class="rr-line" d="' + d + '"/>' +
+    '<circle class="rr-dot" cx="' + (pad + 3) + '" cy="' + f(y) + '" r="3.5"/>' +
+    '<path class="rr-end" d="M' + f(W - pad) + ' ' + f(y - 7) + 'v14"/>' +
+    node.draw(x, y) + '</svg>' };
+}
+
+/* ===== EBNF export (W3C-style, usable with railroad generators) ===== */
+function ident(s) { return s.replace(/[^A-Za-z0-9_]/g, '_').replace(/^(\d)/, '_$1'); }
+function lit(v) { return v.indexOf('"') >= 0 ? "'" + v.replace(/'/g, '') + "'" : '"' + v.replace(/\\/g, '\\\\') + '"'; }
+function toEBNF(n) {
+  function grp(c) { return c.t === 'seq' && c.items.length > 1 ? '(' + toEBNF(c) + ')' : toEBNF(c); }
+  switch (n.t) {
+    case 'term': return lit(n.v);
+    case 'nt': return ident(n.v);
+    case 'seq': return n.items.length ? n.items.map(function (c) { return c.t === 'choice' ? toEBNF(c) : toEBNF(c); }).join(' ') : '""';
+    case 'choice': return '(' + n.items.map(toEBNF).join(' | ') + ')';
+    case 'opt': return n.item.t === 'seq' && !n.item.items.length ? '""' : grp(n.item) + '?';
+    case 'star': return grp(n.item) + '*';
+    case 'plus': return grp(n.item) + '+';
+  }
+  return '""';
+}
+function docToEBNF(doc) {
+  var out = ['/* Cleaned from the GAM syntax document. W3C EBNF. */', ''];
+  doc.ruleOrder.forEach(function (name) {
+    var seen = {}, alts = [];
+    doc.rules[name].forEach(function (d) {
+      var e = toEBNF(d.ast), key = e;
+      if (!seen[key]) { seen[key] = 1; alts.push(e); }
+    });
+    out.push(ident(name) + ' ::= ' + (alts.length === 1 ? alts[0] : alts.map(function (a) { return '(' + a + ')'; }).join(' | ')));
+  });
+  out.push('', '/* commands */');
+  var names = [];
+  doc.commands.forEach(function (c) {
+    var nm = 'cmd_' + (c.id + 1);
+    names.push(nm);
+    out.push('/* ' + c.label.replace(/\*\//g, '') + ' */');
+    out.push(nm + ' ::= ' + toEBNF(c.ast));
+  });
+  out.push('', 'gam_command ::= ' + (names.join(' | ') || '""'));
+  if (doc.issues.undef.length) {
+    out.push('', '/* referenced but never defined in the source: stubbed so the grammar compiles */');
+    doc.issues.undef.forEach(function (u) { out.push(ident(u.name) + ' ::= [#x21-#x7E]+'); });
+  }
+  return out.join('\n');
+}
+
+if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseExpr: parseExpr, tokenize: tokenize, renderSVG: renderSVG, docToEBNF: docToEBNF, build: build };
+
+</script>
+<script>
+(function () {
+  var SAMPLE = "This document describes the GAM command line syntax in modified BNF, see https://en.wikipedia.org/wiki/Backus-Naur_Form\n\n[] optional item\n() group items\n* item may appear zero or more times\n+ item may appear one or more times\n| separates alternative items\n\n## Primitives\n\n<Digit> ::= 0|1|2|3|4|5|6|7|8|9\n<Number> ::= <Digit>+\n<Float> ::= <Digit>*.<Digit>+\n<String> ::= a string of characters, surrounded by \" if it contains spaces\n<FalseValues>= false|off|no|disabled|0\n<TrueValues> ::= true|on|yes|enabled|1\n<Boolean> ::= <TrueValues>|<FalseValues>\n<CalendarColorIndex> ::= <Number in range 1-24>\n<EventColorName> ::=\n        banana|basil|blueberry|flamingo|graphite|grape|\n        lavender|peacock|sage|tangerine|tomato\n<LabelTextColorHex> ::=\n        #04502e|#094228|#0b4f30|#0d3472|#0d3b44|#3d188e|\n        #464646|#594c05|#662e37|#684e07|#711a36|#7a2e0b|\n        #7a4706|#8a1c0a|#994a64|#ffffff\n<DayOfWeek> ::= mon|tue|wed|thu|fri|sat|sun\n<Locale> ::=\n        ''|    #Not defined\n        ar-eg| #Arabic, Egypt\n        az-az| #Azerbaijani, Azerbaijan\n        be-by| #Belarusian, Belarus\n        bg-bg| #Bulgarian, Bulgaria\n        bn-in| #Bengali, India\n        ca-es| #Catalan, Spain\n        cs-cz| #Czech, Czech Republic\n        cy-gb| #Welsh, United Kingdom\n        da-dk| #Danish, Denmark\n        de-ch| #German, Switzerland\n        de-de  #German, Germany\n<RESubstitution> ::= <String>>\n<EmailAddress> ::= <String>@<DomainName>\n<DomainName> ::= <String>(.<String>)+\n<UserItem> ::= <EmailAddress>|<UniqueID>|<String>\n<UserList> ::= \"<UserItem>(,<UserItem>)*\"\n<FileName> ::= <String>\n<Charset> ::= ascii|latin1|mbcs|utf-8|utf-8-sig|utf-16|<String>\n<FileSelector> ::=\n        file ((<FileName> [charset <Charset>])|\n              (gdoc <UserGoogleDoc>)|\n              (gcsdoc <StorageBucketObjectName>))\n             [delimiter <Character>]\n<UserTypeEntity> ::=\n        (all users|users_na|users_arch)|\n        (user <UserItem>)|\n        (users <UserList>)|\n        (query <QueryUser>)|\n        <FileSelector>\n\n# Aliases\n\ngam create|add alias|aliases <EmailAddressEntity> user|group|target <UniqueID>|<EmailAddress>\n        [verifynotinvitable]\ngam delete alias|aliases [user|group|target] <EmailAddressEntity>\n\n# Calendars\n\ngam calendar|calendars <CalendarEntity> create|add event [id <String>] <EventAttribute>+ [<EventNotificationAttribute>]\n        [showdayofweek]\n        [csv [todrive <ToDriveAttribute>*] [formatjson [quotechar <Character>]]]\ngam calendar|calendars <CalendarEntity> delete events [<EventEntity>]\n#       [batchsize <Integer>] [doit] [<EventNotificationAttribute>]\n\n# Users\n\ngam print users [todrive <ToDriveAttribute>*]\n        ([domain|domains <DomainNameEntity>] [(query <QueryUser>)|(queries <QueryUserList>)]\n         [limittoou <OrgUnitItem>] [deleted_only|only_deleted])\n        [orderby <UserOrderByFieldName> [ascending|descending]]\n        [groups|groupsincolumns]\n        [formatjson [quotechar <Character>]]\ngam <UserTypeEntity> print users [countsonly|countonly]\ngam checkconnection\n";
+  var KEY = 'gam-syntax-viewer-text';
+  var FONT = '13px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
+  var mctx = document.createElement('canvas').getContext('2d'); mctx.font = FONT;
+  tw = function (s) { return mctx.measureText(s).width; };
+
+  var $ = function (s) { return document.querySelector(s); };
+  var doc, srcLabel, tab = 'cmd', sel = null, open = [], limit = 1000, zoom = 1, view = 'diagram', q = '', status = '', ebnfCache = null;
+
+  function load(text, label, save) {
+    doc = parseDoc(text); srcLabel = label; ebnfCache = null;
+    sel = doc.commands.length ? { t: 'cmd', id: 0 } : (doc.ruleOrder.length ? { t: 'rule', name: doc.ruleOrder[0] } : null);
+    open = []; view = 'diagram'; status = ''; q = ''; $('#q').value = '';
+    if (save) { try { localStorage.setItem(KEY, text); } catch (e) {} }
+    renderAll();
+  }
+
+  function pill(text) { return '<span class="x">' + esc(text) + '</span>'; }
+
+  function renderSide() {
+    var nIss = doc.issues.undef.length + doc.issues.dups.length + doc.issues.warnings.length;
+    $('#src').textContent = srcLabel + ': ' + doc.commands.length + ' commands, ' + doc.ruleOrder.length + ' rules';
+    var tabs = [['cmd', 'Commands', doc.commands.length], ['rule', 'Rules', doc.ruleOrder.length], ['iss', 'Issues', nIss]];
+    $('#tabs').innerHTML = tabs.map(function (t) {
+      return '<button class="tab" role="tab" data-tab="' + t[0] + '" aria-selected="' + (tab === t[0]) + '">' + t[1] +
+        '<span class="n' + (t[0] === 'iss' && t[2] ? ' bad' : '') + '">' + t[2] + '</span></button>';
+    }).join('');
+    $('#q').style.display = tab === 'iss' ? 'none' : '';
+    var h = '', terms = q.toLowerCase().split(/\s+/).filter(Boolean), cur = sel;
+    if (tab === 'cmd') {
+      var last = null, shown = 0;
+      doc.commands.forEach(function (c) {
+        var hay = (c.label + ' ' + c.text).toLowerCase();
+        if (terms.length && !terms.every(function (t) { return hay.indexOf(t) >= 0; })) return;
+        if (c.section !== last) { h += '<div class="grp">' + esc(c.section || 'Commands') + '</div>'; last = c.section; }
+        h += '<button class="item" data-cmd="' + c.id + '"' + (cur && cur.t === 'cmd' && cur.id === c.id ? ' aria-current="true"' : '') + '>' + esc(c.label) + '</button>';
+        shown++;
+      });
+      if (!shown) h = '<p class="issue-note">No commands match.</p>';
+    } else if (tab === 'rule') {
+      var names = doc.ruleOrder.slice().sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : 1; }), n2 = 0;
+      names.forEach(function (nm) {
+        if (terms.length && !terms.every(function (t) { return nm.toLowerCase().indexOf(t) >= 0; })) return;
+        var c = doc.rules[nm].length;
+        h += '<button class="item" data-rule="' + esc(nm) + '"' + (cur && cur.t === 'rule' && cur.name === nm ? ' aria-current="true"' : '') + '>' + esc('<' + nm + '>') + (c > 1 ? ' ' + pill('×' + c) : '') + '</button>';
+        n2++;
+      });
+      if (!n2) h = '<p class="issue-note">No rules match.</p>';
+    } else {
+      var I = doc.issues;
+      h += '<div class="issue-h">Used but never defined (' + I.undef.length + ')</div>';
+      h += '<p class="issue-note">These nonterminals appear on the right-hand side but have no rule. Strict tools reject that.</p>';
+      I.undef.forEach(function (u) {
+        h += '<button class="item" data-undef="' + esc(u.name) + '"' + (cur && cur.t === 'undef' && cur.name === u.name ? ' aria-current="true"' : '') + '>' + esc('<' + u.name + '>') + ' ' + pill('used ' + u.uses.length + '×') + '</button>';
+      });
+      h += '<div class="issue-h">Defined more than once (' + I.dups.length + ')</div>';
+      I.dups.forEach(function (d) {
+        h += '<button class="item" data-rule="' + esc(d.name) + '">' + esc('<' + d.name + '>') + ' ' + pill(d.count + ' definitions' + (d.identical ? ', identical' : ', different')) + '</button>';
+      });
+      h += '<div class="issue-h">Bracket problems (' + I.warnings.length + ')</div>';
+      I.warnings.forEach(function (w) {
+        if (w.kind === 'cmd') h += '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + ' ' + pill(w.msg) + '</button>';
+        else h += '<button class="item" data-rule="' + esc(w.name) + '">' + esc('<' + w.name + '>') + ' ' + pill(w.msg) + '</button>';
+      });
+    }
+    $('#list').innerHTML = h;
+  }
+
+  function diagramHTML(ast) {
+    var r = renderSVG(ast, limit / zoom);
+    return '<div class="canvas"><div data-w="' + Math.round(r.w) + '" data-h="' + Math.round(r.h) + '">' + r.svg + '</div></div>';
+  }
+  function applyZoom() {
+    document.querySelectorAll('.canvas > div').forEach(function (d) {
+      var s = d.firstChild, w = +d.dataset.w * zoom, h = +d.dataset.h * zoom;
+      s.style.width = w + 'px'; s.style.height = h + 'px';
+    });
+  }
+  function nts(ast) { var seen = {}, out = []; walkNT(ast, function (v) { if (!seen[v]) { seen[v] = 1; out.push(v); } }); return out; }
+
+  function renderBar() {
+    var h = '';
+    if (view === 'ebnf') {
+      h = '<button class="btn" data-view="diagram" type="button">Back to diagrams</button><span class="sp"></span>';
+    } else {
+      h = '<label>Wrap at <input type="range" id="wrap" min="500" max="3000" step="50" value="' + limit + '" aria-label="Wrap width"><span id="wrapv">' + limit + '</span></label>' +
+        '<span class="zoom"><button class="btn" data-zoom="-" type="button" aria-label="Zoom out">−</button><span id="zv">' + Math.round(zoom * 100) + '%</span><button class="btn" data-zoom="+" type="button" aria-label="Zoom in">+</button></span>' +
+        '<span class="sp"></span><button class="btn" data-view="ebnf" type="button">Cleaned EBNF</button>';
+    }
+    $('#bar').innerHTML = h;
+  }
+
+  function renderContent() {
+    var el = $('#content'), h = '';
+    if (view === 'ebnf') {
+      if (ebnfCache === null) ebnfCache = docToEBNF(doc);
+      el.innerHTML = '<h2>Cleaned EBNF</h2><p class="meta">W3C-style grammar generated from the whole file. Missing rules are stubbed so it compiles. Paste it into a railroad generator or parser.</p>' +
+        '<div class="row" style="margin:0 0 10px"><button class="btn primary" id="copyE" type="button">Copy to clipboard</button></div>' +
+        '<textarea class="ebnf" id="ebnfText" readonly spellcheck="false"></textarea>';
+      $('#ebnfText').value = ebnfCache;
+      return;
+    }
+    if (!sel) { el.innerHTML = '<div class="notice"><p>Nothing to show yet.</p><p>Open your GAM file or paste its text. Lines that start with gam become commands, and lines like &lt;Name&gt; ::= define rules.</p></div>'; return; }
+    var ast = null;
+    if (sel.t === 'cmd') {
+      var c = doc.commands[sel.id];
+      h += '<h2>' + esc(c.label) + '</h2><p class="meta">' + esc(c.section || 'Commands') + ', line ' + c.line + '</p>';
+      h += '<pre class="syntax">' + esc(c.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + diagramHTML(c.ast); ast = c.ast;
+    } else if (sel.t === 'rule') {
+      var defs = doc.rules[sel.name];
+      h += '<h2>' + esc('<' + sel.name + '>') + '</h2><p class="meta">' + esc(defs[0].sub || defs[0].section || 'Rule') + ', line ' + defs[0].line + (defs.length > 1 ? '. Defined ' + defs.length + ' times.' : '') + '</p>';
+      defs.forEach(function (d, i) {
+        if (defs.length > 1) h += '<div class="def-h">Definition ' + (i + 1) + ' of ' + defs.length + ', line ' + d.line + '</div>';
+        h += '<pre class="syntax">' + esc(d.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + diagramHTML(d.ast);
+      });
+      ast = { t: 'seq', items: defs.map(function (d) { return d.ast; }) };
+    } else {
+      var u = doc.issues.undef.filter(function (x) { return x.name === sel.name; })[0];
+      h += '<h2>' + esc('<' + sel.name + '>') + '</h2><p class="meta">Referenced but never defined</p><div class="notice"><p>Add a rule for this name, or remove the reference, so a strict parser can compile the grammar.</p><p>Used in:</p><div class="uses">';
+      (u ? u.uses : []).slice(0, 40).forEach(function (w) {
+        h += w.kind === 'cmd' ? '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + '</button>' : '<button class="item" data-rule="' + esc(w.name) + '">' + esc('<' + w.name + '>') + '</button>';
+      });
+      h += '</div></div>';
+    }
+    if (ast) {
+      var ns = nts(ast);
+      if (ns.length) {
+        h += '<div class="refs"><h3>Rules used here</h3><div class="chips">' + ns.map(function (n) {
+          return '<button class="chip' + (doc.rules[n] ? '' : ' undef') + '" data-open="' + esc(n) + '" title="' + (doc.rules[n] ? 'Show this rule below' : 'Never defined in this file') + '">' + esc(n) + '</button>';
+        }).join('') + '</div></div>';
+      }
+    }
+    h += '<div class="status" id="status" role="status">' + esc(status) + '</div>';
+    if (open.length) {
+      h += '<div class="drawer"><h3>Opened rules</h3>';
+      open.forEach(function (n) {
+        var defs = doc.rules[n];
+        h += '<div class="card"><div class="card-h"><b>' + esc('<' + n + '>') + '</b><button class="btn" data-rule="' + esc(n) + '" type="button">Open as main</button><button class="btn" data-close="' + esc(n) + '" type="button">Close</button></div>';
+        defs.forEach(function (d) { h += '<pre class="syntax">' + esc(d.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + diagramHTML(d.ast); });
+        h += '</div>';
+      });
+      h += '</div>';
+    }
+    el.innerHTML = h;
+    applyZoom();
+  }
+
+  function renderAll() { renderSide(); renderBar(); renderContent(); }
+
+  function openRule(name) {
+    if (!doc.rules[name]) { status = '“' + name + '” isn’t defined in this file.'; renderContent(); return; }
+    status = '';
+    open = open.filter(function (n) { return n !== name; }); open.unshift(name); open = open.slice(0, 6);
+    renderContent();
+    var card = document.querySelector('.card'); if (card) card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  document.addEventListener('click', function (e) {
+    var t = e.target, b;
+    if ((b = t.closest('[data-tab]'))) { tab = b.dataset.tab; renderSide(); return; }
+    if ((b = t.closest('[data-cmd]'))) { sel = { t: 'cmd', id: +b.dataset.cmd }; open = []; view = 'diagram'; status = ''; renderAll(); $('#main').scrollTop = 0; return; }
+    if ((b = t.closest('[data-rule]'))) { sel = { t: 'rule', name: b.dataset.rule }; open = []; view = 'diagram'; status = ''; renderAll(); $('#main').scrollTop = 0; return; }
+    if ((b = t.closest('[data-undef]'))) { sel = { t: 'undef', name: b.dataset.undef }; view = 'diagram'; renderAll(); return; }
+    if ((b = t.closest('[data-open]'))) { openRule(b.dataset.open); return; }
+    if ((b = t.closest('.rr-nt'))) { openRule(b.getAttribute('data-nt')); return; }
+    if ((b = t.closest('[data-close]'))) { open = open.filter(function (n) { return n !== b.dataset.close; }); renderContent(); return; }
+    if ((b = t.closest('[data-view]'))) { view = b.dataset.view; renderBar(); renderContent(); return; }
+    if ((b = t.closest('[data-zoom]'))) {
+      zoom = Math.min(2, Math.max(0.4, zoom + (b.dataset.zoom === '+' ? 0.1 : -0.1)));
+      renderBar(); renderContent(); return;
+    }
+    if (t.id === 'copyE') {
+      var ta = $('#ebnfText'); ta.focus(); ta.select();
+      try { navigator.clipboard.writeText(ta.value).then(function () { t.textContent = 'Copied'; }, function () { document.execCommand('copy'); t.textContent = 'Copied'; }); }
+      catch (err) { try { document.execCommand('copy'); t.textContent = 'Copied'; } catch (e2) { t.textContent = 'Press Ctrl+C to copy'; } }
+    }
+  });
+  document.addEventListener('input', function (e) {
+    if (e.target.id === 'q') { q = e.target.value; renderSide(); }
+    if (e.target.id === 'wrap') { limit = +e.target.value; $('#wrapv').textContent = limit; clearTimeout(load.t); load.t = setTimeout(renderContent, 120); }
+  });
+
+  $('#openBtn').addEventListener('click', function () { $('#file').click(); });
+  $('#file').addEventListener('change', function (e) { readFile(e.target.files[0]); e.target.value = ''; });
+  function readFile(file) {
+    if (!file) return;
+    var r = new FileReader();
+    r.onload = function () { load(String(r.result), file.name, true); };
+    r.readAsText(file);
+  }
+  window.addEventListener('dragover', function (e) { e.preventDefault(); });
+  window.addEventListener('drop', function (e) { e.preventDefault(); if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]); });
+  $('#pasteBtn').addEventListener('click', function () { $('#panel').classList.add('on'); $('#paste').focus(); });
+  $('#pasteCancel').addEventListener('click', function () { $('#panel').classList.remove('on'); });
+  $('#pasteGo').addEventListener('click', function () {
+    var v = $('#paste').value; if (!v.trim()) return;
+    $('#panel').classList.remove('on'); load(v, 'Pasted text', true);
+  });
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') $('#panel').classList.remove('on'); });
+
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  if (saved && saved.length > 200) load(saved, 'Your file (remembered in this browser)', false);
+  else load(SAMPLE, 'Sample excerpt, open your file to see everything', false);
+})();
+</script>
+</body>
+</html>

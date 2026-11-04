@@ -1,0 +1,82 @@
+This document describes the GAM command line syntax in modified BNF, see https://en.wikipedia.org/wiki/Backus-Naur_Form
+
+[] optional item
+() group items
+* item may appear zero or more times
++ item may appear one or more times
+| separates alternative items
+
+## Primitives
+
+<Digit> ::= 0|1|2|3|4|5|6|7|8|9
+<Number> ::= <Digit>+
+<Float> ::= <Digit>*.<Digit>+
+<String> ::= a string of characters, surrounded by " if it contains spaces
+<FalseValues>= false|off|no|disabled|0
+<TrueValues> ::= true|on|yes|enabled|1
+<Boolean> ::= <TrueValues>|<FalseValues>
+<CalendarColorIndex> ::= <Number in range 1-24>
+<EventColorName> ::=
+        banana|basil|blueberry|flamingo|graphite|grape|
+        lavender|peacock|sage|tangerine|tomato
+<LabelTextColorHex> ::=
+        #04502e|#094228|#0b4f30|#0d3472|#0d3b44|#3d188e|
+        #464646|#594c05|#662e37|#684e07|#711a36|#7a2e0b|
+        #7a4706|#8a1c0a|#994a64|#ffffff
+<DayOfWeek> ::= mon|tue|wed|thu|fri|sat|sun
+<Locale> ::=
+        ''|    #Not defined
+        ar-eg| #Arabic, Egypt
+        az-az| #Azerbaijani, Azerbaijan
+        be-by| #Belarusian, Belarus
+        bg-bg| #Bulgarian, Bulgaria
+        bn-in| #Bengali, India
+        ca-es| #Catalan, Spain
+        cs-cz| #Czech, Czech Republic
+        cy-gb| #Welsh, United Kingdom
+        da-dk| #Danish, Denmark
+        de-ch| #German, Switzerland
+        de-de  #German, Germany
+<RESubstitution> ::= <String>>
+<EmailAddress> ::= <String>@<DomainName>
+<DomainName> ::= <String>(.<String>)+
+<UserItem> ::= <EmailAddress>|<UniqueID>|<String>
+<UserList> ::= "<UserItem>(,<UserItem>)*"
+<FileName> ::= <String>
+<Charset> ::= ascii|latin1|mbcs|utf-8|utf-8-sig|utf-16|<String>
+<FileSelector> ::=
+        file ((<FileName> [charset <Charset>])|
+              (gdoc <UserGoogleDoc>)|
+              (gcsdoc <StorageBucketObjectName>))
+             [delimiter <Character>]
+<UserTypeEntity> ::=
+        (all users|users_na|users_arch)|
+        (user <UserItem>)|
+        (users <UserList>)|
+        (query <QueryUser>)|
+        <FileSelector>
+
+# Aliases
+
+gam create|add alias|aliases <EmailAddressEntity> user|group|target <UniqueID>|<EmailAddress>
+        [verifynotinvitable]
+gam delete alias|aliases [user|group|target] <EmailAddressEntity>
+
+# Calendars
+
+gam calendar|calendars <CalendarEntity> create|add event [id <String>] <EventAttribute>+ [<EventNotificationAttribute>]
+        [showdayofweek]
+        [csv [todrive <ToDriveAttribute>*] [formatjson [quotechar <Character>]]]
+gam calendar|calendars <CalendarEntity> delete events [<EventEntity>]
+#       [batchsize <Integer>] [doit] [<EventNotificationAttribute>]
+
+# Users
+
+gam print users [todrive <ToDriveAttribute>*]
+        ([domain|domains <DomainNameEntity>] [(query <QueryUser>)|(queries <QueryUserList>)]
+         [limittoou <OrgUnitItem>] [deleted_only|only_deleted])
+        [orderby <UserOrderByFieldName> [ascending|descending]]
+        [groups|groupsincolumns]
+        [formatjson [quotechar <Character>]]
+gam <UserTypeEntity> print users [countsonly|countonly]
+gam checkconnection
