@@ -35,7 +35,7 @@ button,input,textarea{font:inherit;color:inherit}
 button{cursor:pointer}
 :focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
-.app{display:grid;grid-template-columns:330px minmax(0,1fr);height:100%}
+.app{display:grid;grid-template-columns:350px minmax(0,1fr);height:100%}
 .side{display:flex;flex-direction:column;min-height:0;background:var(--panel);border-right:1px solid var(--rule)}
 .side-head{padding:16px 16px 10px}
 .side-head h1{margin:0 0 2px;font-size:17px;font-weight:650;letter-spacing:-.01em}
@@ -46,10 +46,10 @@ button{cursor:pointer}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 :root[data-theme="dark"] .btn.primary{color:#10151b}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]) .btn.primary{color:#10151b}}
-.tabs{display:flex;border-bottom:1px solid var(--rule);padding:0 8px}
-.tab{background:none;border:0;border-bottom:2px solid transparent;padding:8px 10px;color:var(--muted);font-size:13px}
+.tabs{display:flex;border-bottom:1px solid var(--rule);padding:0 6px}
+.tab{flex:1 1 auto;min-width:0;white-space:nowrap;background:none;border:0;border-bottom:2px solid transparent;padding:8px 4px;color:var(--muted);font-size:12.5px}
 .tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent);font-weight:600}
-.tab .n{color:var(--muted);font-weight:400;margin-left:4px}
+.tab .n{color:var(--muted);font-weight:400;margin-left:3px;font-size:11.5px}
 .tab .n.bad{color:var(--warn);font-weight:600}
 .search{margin:10px 12px 6px;border:1px solid var(--rule);background:var(--bg);border-radius:6px;padding:6px 9px;width:calc(100% - 24px);box-sizing:border-box}
 .list{flex:1;min-height:0;overflow:auto;padding:0 6px 14px}
@@ -73,6 +73,8 @@ button{cursor:pointer}
 .meta{margin:4px 0 12px;color:var(--muted);font-size:13px}
 pre.syntax{margin:0 0 16px;padding:10px 12px;background:var(--panel);border:1px solid var(--rule);border-radius:6px;font:12px/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
 .canvas{overflow-x:auto;background:var(--panel);border:1px solid var(--rule);border-radius:8px;padding:6px}
+.rnote{margin:-8px 0 14px;padding:0 2px;color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+.card .rnote{margin:6px 12px 0}
 .def-h{margin:14px 0 6px;color:var(--muted);font-size:13px}
 .refs{margin:18px 0 0}
 .refs h3,.drawer h3{margin:0 0 8px;font-size:13px;font-weight:600}
@@ -86,6 +88,17 @@ pre.syntax{margin:0 0 16px;padding:10px 12px;background:var(--panel);border:1px 
 .card-h .btn{padding:2px 8px;font-size:12px}
 .card .canvas{border:0;border-radius:0}
 .card pre.syntax{margin:8px 12px 0;font-size:11.5px}
+.xq{width:100%;box-sizing:border-box;margin:4px 0 14px;padding:11px 14px;font:15px var(--mono);background:var(--panel);color:var(--ink);border:1.5px solid var(--nt-stroke);border-radius:8px}
+.xq::placeholder{color:var(--muted)}
+.xhead{margin:16px 0 8px;font-size:13px;font-weight:600}
+.xhead .n{color:var(--muted);font-weight:400;margin-left:6px}
+.chip.kw{border-color:var(--term-stroke);background:var(--term-bg);border-radius:12px;padding:3px 10px}
+.chip .cnt{color:var(--muted);margin-left:6px;font-size:11px}
+.chip:hover{filter:brightness(.96)}
+.xmatches{display:flex;flex-direction:column;align-items:flex-start;gap:1px;max-height:240px;overflow:auto;padding:4px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);width:100%;box-sizing:border-box}
+.xmatches .item{width:auto;max-width:100%}
+.xmatches .item .ok{color:var(--accent);margin-left:6px;font-family:var(--sans);font-size:11.5px}
+.xmore{background:none;border:0;color:var(--accent);padding:4px 2px;font-size:13px}
 .notice{padding:14px 16px;border:1px solid var(--rule);border-radius:8px;background:var(--panel);max-width:70ch}
 .notice p{margin:0 0 8px}
 .status{min-height:18px;margin:8px 0 0;color:var(--warn);font-size:13px}
@@ -163,7 +176,7 @@ __CORE__
   tw = function (s) { return mctx.measureText(s).width; };
 
   var $ = function (s) { return document.querySelector(s); };
-  var doc, srcLabel, tab = 'cmd', sel = null, open = [], limit = 1000, zoom = 1, view = 'diagram', q = '', status = '', ebnfCache = null;
+  var doc, srcLabel, tab = 'cmd', sel = null, open = [], limit = 1000, zoom = 1, view = 'diagram', q = '', status = '', ebnfCache = null, xtext = '', xsel = null, xall = false;
 
   function load(text, label, save) {
     doc = parseDoc(text); srcLabel = label; ebnfCache = null;
@@ -178,12 +191,12 @@ __CORE__
   function renderSide() {
     var nIss = doc.issues.undef.length + doc.issues.dups.length + doc.issues.warnings.length;
     $('#src').textContent = srcLabel + ': ' + doc.commands.length + ' commands, ' + doc.ruleOrder.length + ' rules';
-    var tabs = [['cmd', 'Commands', doc.commands.length], ['rule', 'Rules', doc.ruleOrder.length], ['iss', 'Issues', nIss]];
+    var tabs = [['cmd', 'Commands', doc.commands.length], ['rule', 'Rules', doc.ruleOrder.length], ['iss', 'Issues', nIss], ['x', 'Explore', '']];
     $('#tabs').innerHTML = tabs.map(function (t) {
       return '<button class="tab" role="tab" data-tab="' + t[0] + '" aria-selected="' + (tab === t[0]) + '">' + t[1] +
         '<span class="n' + (t[0] === 'iss' && t[2] ? ' bad' : '') + '">' + t[2] + '</span></button>';
     }).join('');
-    $('#q').style.display = tab === 'iss' ? 'none' : '';
+    $('#q').style.display = (tab === 'iss' || tab === 'x') ? 'none' : '';
     var h = '', terms = q.toLowerCase().split(/\s+/).filter(Boolean), cur = sel;
     if (tab === 'cmd') {
       var last = null, shown = 0;
@@ -204,21 +217,30 @@ __CORE__
         n2++;
       });
       if (!n2) h = '<p class="issue-note">No rules match.</p>';
+    } else if (tab === 'x') {
+      h = '<p class="issue-note">Type the start of a command in the box on the right. The words that can legally come next appear as you type, along with every command that is still possible.</p><p class="issue-note">Click a word to add it. Press Tab to accept the only suggestion.</p>';
     } else {
       var I = doc.issues;
-      h += '<div class="issue-h">Used but never defined (' + I.undef.length + ')</div>';
-      h += '<p class="issue-note">These nonterminals appear on the right-hand side but have no rule. Strict tools reject that.</p>';
-      I.undef.forEach(function (u) {
-        h += '<button class="item" data-undef="' + esc(u.name) + '"' + (cur && cur.t === 'undef' && cur.name === u.name ? ' aria-current="true"' : '') + '>' + esc('<' + u.name + '>') + ' ' + pill('used ' + u.uses.length + '×') + '</button>';
-      });
+      var typos = I.undef.filter(function (u) { return u.suggest; }), others = I.undef.filter(function (u) { return !u.suggest; });
+      function undefBtn(u) {
+        return '<button class="item" data-undef="' + esc(u.name) + '"' + (cur && cur.t === 'undef' && cur.name === u.name ? ' aria-current="true"' : '') + '>' + esc('<' + u.name + '>') +
+          (u.suggest ? ' ' + pill('did you mean <' + u.suggest + '>?') : '') + ' ' + pill('line ' + u.line + ', ' + u.uses.length + (u.uses.length === 1 ? ' use' : ' uses')) + '</button>';
+      }
+      h += '<div class="issue-h">Likely typos (' + typos.length + ')</div>';
+      h += '<p class="issue-note">Used but never defined, and spelled almost like a rule that is. Fix these first.</p>';
+      typos.forEach(function (u) { h += undefBtn(u); });
+      h += '<div class="issue-h">Never defined (' + others.length + ')</div>';
+      h += '<p class="issue-note">No close match anywhere. Many are implicit primitives such as Integer or FilePath. Strict tools still need a rule for each.</p>';
+      others.forEach(function (u) { h += undefBtn(u); });
       h += '<div class="issue-h">Defined more than once (' + I.dups.length + ')</div>';
       I.dups.forEach(function (d) {
-        h += '<button class="item" data-rule="' + esc(d.name) + '">' + esc('<' + d.name + '>') + ' ' + pill(d.count + ' definitions' + (d.identical ? ', identical' : ', different')) + '</button>';
+        h += '<button class="item" data-rule="' + esc(d.name) + '">' + esc('<' + d.name + '>') + ' ' + pill(d.count + ' definitions, ' + (d.identical ? 'identical' : 'different') + ', lines ' + d.lines.join(', ')) + '</button>';
       });
       h += '<div class="issue-h">Bracket problems (' + I.warnings.length + ')</div>';
+      h += '<p class="issue-note">Unbalanced [ ] or ( ) in the source text. The diagram guesses the intent, so check the line.</p>';
       I.warnings.forEach(function (w) {
-        if (w.kind === 'cmd') h += '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + ' ' + pill(w.msg) + '</button>';
-        else h += '<button class="item" data-rule="' + esc(w.name) + '">' + esc('<' + w.name + '>') + ' ' + pill(w.msg) + '</button>';
+        if (w.kind === 'cmd') h += '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + ' ' + pill(w.msg + ', line ' + doc.commands[w.id].line) + '</button>';
+        else h += '<button class="item" data-rule="' + esc(w.name) + '">' + esc('<' + w.name + '>') + ' ' + pill(w.msg + ', line ' + doc.rules[w.name][0].line) + '</button>';
       });
     }
     $('#list').innerHTML = h;
@@ -227,6 +249,9 @@ __CORE__
   function diagramHTML(ast) {
     var r = renderSVG(ast, limit / zoom);
     return '<div class="canvas"><div data-w="' + Math.round(r.w) + '" data-h="' + Math.round(r.h) + '">' + r.svg + '</div></div>';
+  }
+  function noteHTML(notes) {
+    return notes && notes.length ? '<p class="rnote">' + notes.map(esc).join('<br>') + '</p>' : '';
   }
   function applyZoom() {
     document.querySelectorAll('.canvas > div').forEach(function (d) {
@@ -239,7 +264,7 @@ __CORE__
   function renderBar() {
     var h = '';
     if (view === 'ebnf') {
-      h = '<button class="btn" data-view="diagram" type="button">Back to diagrams</button><span class="sp"></span>';
+      h = '<button class="btn" data-view="' + (tab === 'x' ? 'explore' : 'diagram') + '" type="button">Back</button><span class="sp"></span>';
     } else {
       h = '<label>Wrap at <input type="range" id="wrap" min="500" max="3000" step="50" value="' + limit + '" aria-label="Wrap width"><span id="wrapv">' + limit + '</span></label>' +
         '<span class="zoom"><button class="btn" data-zoom="-" type="button" aria-label="Zoom out">−</button><span id="zv">' + Math.round(zoom * 100) + '%</span><button class="btn" data-zoom="+" type="button" aria-label="Zoom in">+</button></span>' +
@@ -258,25 +283,35 @@ __CORE__
       $('#ebnfText').value = ebnfCache;
       return;
     }
+    if (view === 'explore') {
+      el.innerHTML = '<h2>Explore command paths</h2><p class="meta">Start typing a command. The next possible words update as you type.</p>' +
+        '<input id="xq" class="xq" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="gam print users " aria-label="Type a gam command">' +
+        '<div id="xres"></div>';
+      $('#xq').value = xtext;
+      renderExplore();
+      return;
+    }
     if (!sel) { el.innerHTML = '<div class="notice"><p>Nothing to show yet.</p><p>Open your GAM file or paste its text. Lines that start with gam become commands, and lines like &lt;Name&gt; ::= define rules.</p></div>'; return; }
     var ast = null;
     if (sel.t === 'cmd') {
       var c = doc.commands[sel.id];
       h += '<h2>' + esc(c.label) + '</h2><p class="meta">' + esc(c.section || 'Commands') + ', line ' + c.line + '</p>';
-      h += '<pre class="syntax">' + esc(c.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + diagramHTML(c.ast); ast = c.ast;
+      h += '<pre class="syntax">' + esc(c.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + noteHTML(c.notes) + diagramHTML(c.ast); ast = c.ast;
     } else if (sel.t === 'rule') {
       var defs = doc.rules[sel.name];
       h += '<h2>' + esc('<' + sel.name + '>') + '</h2><p class="meta">' + esc(defs[0].sub || defs[0].section || 'Rule') + ', line ' + defs[0].line + (defs.length > 1 ? '. Defined ' + defs.length + ' times.' : '') + '</p>';
       defs.forEach(function (d, i) {
         if (defs.length > 1) h += '<div class="def-h">Definition ' + (i + 1) + ' of ' + defs.length + ', line ' + d.line + '</div>';
-        h += '<pre class="syntax">' + esc(d.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + diagramHTML(d.ast);
+        h += '<pre class="syntax">' + esc(d.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + noteHTML(d.notes) + diagramHTML(d.ast);
       });
       ast = { t: 'seq', items: defs.map(function (d) { return d.ast; }) };
     } else {
       var u = doc.issues.undef.filter(function (x) { return x.name === sel.name; })[0];
-      h += '<h2>' + esc('<' + sel.name + '>') + '</h2><p class="meta">Referenced but never defined</p><div class="notice"><p>Add a rule for this name, or remove the reference, so a strict parser can compile the grammar.</p><p>Used in:</p><div class="uses">';
-      (u ? u.uses : []).slice(0, 40).forEach(function (w) {
-        h += w.kind === 'cmd' ? '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + '</button>' : '<button class="item" data-rule="' + esc(w.name) + '">' + esc('<' + w.name + '>') + '</button>';
+      h += '<h2>' + esc('<' + sel.name + '>') + '</h2><p class="meta">Referenced but never defined' + (u && u.suggest ? '. Probably a typo for ' + esc('<' + u.suggest + '>') : '') + '</p><div class="notice"><p>Add a rule for this name, or fix the spelling at the places below, so a strict parser can compile the grammar.</p>' +
+        (u && u.suggest ? '<p><button class="chip" data-rule="' + esc(u.suggest) + '" type="button">View ' + esc('<' + u.suggest + '>') + '</button></p>' : '') + '<p>Used in:</p><div class="uses">';
+      var seenUse = {};
+      (u ? u.uses : []).filter(function (w) { var k = w.kind + (w.kind === 'cmd' ? w.id : w.name); if (seenUse[k]) return false; seenUse[k] = 1; return true; }).slice(0, 40).forEach(function (w) {
+        h += w.kind === 'cmd' ? '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + ' ' + pill('line ' + w.line) + '</button>' : '<button class="item" data-rule="' + esc(w.name) + '">' + esc('<' + w.name + '>') + ' ' + pill('line ' + w.line) + '</button>';
       });
       h += '</div></div>';
     }
@@ -294,7 +329,7 @@ __CORE__
       open.forEach(function (n) {
         var defs = doc.rules[n];
         h += '<div class="card"><div class="card-h"><b>' + esc('<' + n + '>') + '</b><button class="btn" data-rule="' + esc(n) + '" type="button">Open as main</button><button class="btn" data-close="' + esc(n) + '" type="button">Close</button></div>';
-        defs.forEach(function (d) { h += '<pre class="syntax">' + esc(d.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + diagramHTML(d.ast); });
+        defs.forEach(function (d) { h += '<pre class="syntax">' + esc(d.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + noteHTML(d.notes) + diagramHTML(d.ast); });
         h += '</div>';
       });
       h += '</div>';
@@ -302,6 +337,40 @@ __CORE__
     el.innerHTML = h;
     applyZoom();
   }
+
+  function renderExplore() {
+    var box = $('#xres'); if (!box) return;
+    var r = explore(doc, xtext), h = '', kws = r.next.filter(function (e) { return e.kind === 'kw'; }), vals = r.next.filter(function (e) { return e.kind === 'val'; });
+    var nDone = r.matches.filter(function (m) { return m.done; }).length;
+    if (!r.matches.length) {
+      box.innerHTML = '<div class="notice"><p>No command in this file continues that way.</p><p>Check the last word, or delete it to go back one step.</p></div>';
+      return;
+    }
+    h += '<div class="xhead">Next word<span class="n">' + kws.length + (kws.length === 1 ? ' keyword' : ' keywords') + (vals.length ? ', ' + vals.length + (vals.length === 1 ? ' value' : ' values') : '') + (nDone ? '. The command can end here.' : '') + '</span></div><div class="chips">';
+    var cap = xall ? 1e9 : 60;
+    kws.slice(0, cap).forEach(function (e) { h += '<button class="chip kw" data-x="' + esc(e.text) + '" type="button">' + esc(e.text) + '<span class="cnt">' + e.count + '</span></button>'; });
+    vals.forEach(function (e) {
+      var nm = e.text.slice(1, -1);
+      h += '<button class="chip' + (doc.rules[nm] ? '' : ' undef') + '" data-open="' + esc(nm) + '" type="button" title="A value goes here. Click to see its rule.">' + esc(e.text) + '<span class="cnt">' + e.count + '</span></button>';
+    });
+    if (kws.length > cap) h += '<button class="xmore" data-xall="1" type="button">Show all ' + kws.length + '</button>';
+    if (!kws.length && !vals.length) h += '<span class="meta">Nothing more to add.</span>';
+    h += '</div>';
+    h += '<div class="xhead">Matching commands<span class="n">' + r.matches.length + (r.over ? '. Some very large rules were only partly searched.' : '') + '</span></div><div class="xmatches">';
+    r.matches.slice(0, 60).forEach(function (m) {
+      h += '<button class="item" data-xsel="' + m.id + '"' + (xsel === m.id ? ' aria-current="true"' : '') + '>' + esc(doc.commands[m.id].label) + (m.done ? '<span class="ok">complete</span>' : '') + '</button>';
+    });
+    if (r.matches.length > 60) h += '<span class="meta" style="padding:4px 8px">and ' + (r.matches.length - 60) + ' more. Keep typing to narrow it down.</span>';
+    h += '</div>';
+    var pick = xsel !== null && r.matches.some(function (m) { return m.id === xsel; }) ? xsel : (r.matches.length === 1 ? r.matches[0].id : null);
+    if (pick !== null) {
+      var c = doc.commands[pick];
+      h += '<div class="xhead">' + esc(c.label) + '</div><pre class="syntax">' + esc(c.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + diagramHTML(c.ast);
+    }
+    box.innerHTML = h;
+    applyZoom();
+  }
+  function setX(v) { xtext = v; xsel = null; var i = $('#xq'); if (i && i.value !== v) i.value = v; renderExplore(); }
 
   function renderAll() { renderSide(); renderBar(); renderContent(); }
 
@@ -315,12 +384,24 @@ __CORE__
 
   document.addEventListener('click', function (e) {
     var t = e.target, b;
-    if ((b = t.closest('[data-tab]'))) { tab = b.dataset.tab; renderSide(); return; }
-    if ((b = t.closest('[data-cmd]'))) { sel = { t: 'cmd', id: +b.dataset.cmd }; open = []; view = 'diagram'; status = ''; renderAll(); $('#main').scrollTop = 0; return; }
-    if ((b = t.closest('[data-rule]'))) { sel = { t: 'rule', name: b.dataset.rule }; open = []; view = 'diagram'; status = ''; renderAll(); $('#main').scrollTop = 0; return; }
+    if ((b = t.closest('[data-tab]'))) {
+      tab = b.dataset.tab;
+      if (tab === 'x') view = 'explore'; else if (view === 'explore') view = 'diagram';
+      renderAll(); if (tab === 'x' && $('#xq')) $('#xq').focus(); return;
+    }
+    if ((b = t.closest('[data-cmd]'))) { if (tab === 'x') tab = 'cmd'; sel = { t: 'cmd', id: +b.dataset.cmd }; open = []; view = 'diagram'; status = ''; renderAll(); $('#main').scrollTop = 0; return; }
+    if ((b = t.closest('[data-rule]'))) { if (tab === 'x') tab = 'cmd'; sel = { t: 'rule', name: b.dataset.rule }; open = []; view = 'diagram'; status = ''; renderAll(); $('#main').scrollTop = 0; return; }
     if ((b = t.closest('[data-undef]'))) { sel = { t: 'undef', name: b.dataset.undef }; view = 'diagram'; renderAll(); return; }
     if ((b = t.closest('[data-open]'))) { openRule(b.dataset.open); return; }
     if ((b = t.closest('.rr-nt'))) { openRule(b.getAttribute('data-nt')); return; }
+    if ((b = t.closest('[data-x]'))) {
+      var tok = b.dataset.x;
+      setX((/\s$/.test(xtext) || !xtext ? xtext : xtext.replace(/\S+$/, '')) + tok + ' ');
+      var xi = $('#xq'); if (xi) { xi.focus(); xi.setSelectionRange(xi.value.length, xi.value.length); }
+      return;
+    }
+    if ((b = t.closest('[data-xsel]'))) { xsel = +b.dataset.xsel; renderExplore(); return; }
+    if ((b = t.closest('[data-xall]'))) { xall = true; renderExplore(); return; }
     if ((b = t.closest('[data-close]'))) { open = open.filter(function (n) { return n !== b.dataset.close; }); renderContent(); return; }
     if ((b = t.closest('[data-view]'))) { view = b.dataset.view; renderBar(); renderContent(); return; }
     if ((b = t.closest('[data-zoom]'))) {
@@ -335,6 +416,7 @@ __CORE__
   });
   document.addEventListener('input', function (e) {
     if (e.target.id === 'q') { q = e.target.value; renderSide(); }
+    if (e.target.id === 'xq') { xtext = e.target.value; xsel = null; clearTimeout(load.x); load.x = setTimeout(renderExplore, 40); }
     if (e.target.id === 'wrap') { limit = +e.target.value; $('#wrapv').textContent = limit; clearTimeout(load.t); load.t = setTimeout(renderContent, 120); }
   });
 
@@ -354,7 +436,13 @@ __CORE__
     var v = $('#paste').value; if (!v.trim()) return;
     $('#panel').classList.remove('on'); load(v, 'Pasted text', true);
   });
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') $('#panel').classList.remove('on'); });
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape') $('#panel').classList.remove('on');
+    if (e.key === 'Tab' && e.target.id === 'xq' && !e.shiftKey) {
+      var kw = explore(doc, e.target.value).next.filter(function (x) { return x.kind === 'kw'; });
+      if (kw.length === 1) { e.preventDefault(); setX((/\s$/.test(xtext) || !xtext ? xtext : xtext.replace(/\S+$/, '')) + kw[0].text + ' '); e.target.setSelectionRange(e.target.value.length, e.target.value.length); }
+    }
+  });
 
   var saved = null;
   try { saved = localStorage.getItem(KEY); } catch (e) {}

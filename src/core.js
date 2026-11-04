@@ -113,6 +113,7 @@ function cleanLine(ln) {
 }
 
 function cmdLabel(ast, text) {
+  while (ast.t === 'choice') ast = ast.items[0]; // a stray | in the source splits the command in two; label by the first half
   var items = ast.t === 'seq' ? ast.items : [ast], out = [];
   for (var i = 0; i < items.length && out.length < 7; i++) {
     var c = items[i];
@@ -120,6 +121,10 @@ function cmdLabel(ast, text) {
     else if (c.t === 'choice' && c.items.every(function (x) { return x.t === 'term'; })) out.push(c.items.map(function (x) { return x.v; }).join('|'));
     else if (c.t === 'nt' && i > 0 && i < 4) out.push('<' + c.v + '>');
     else break;
+  }
+  if (out.length < 2) { // e.g. "gam [<Select>] ...": show the first few pieces so the label means something
+    var sh = function (c) { return c.t === 'term' ? c.v : c.t === 'nt' ? '<' + c.v + '>' : c.t === 'opt' ? '[' + sh(c.item) + ']' : '…'; };
+    out = items.slice(0, 4).map(sh);
   }
   return out.join(' ') || text.slice(0, 40);
 }
@@ -132,15 +137,23 @@ function parseDoc(text) {
   function flush() {
     if (!cur) return;
     var body = cur.lines.join('\n').trim();
+    var nonEmpty = cur.lines.filter(function (l) { return l.trim(); });
+    if (cur.kind === 'rule' && nonEmpty.length > 1 && nonEmpty.every(function (l) { return /^\s*https?:\/\//.test(l); }))
+      body = nonEmpty.map(function (l) { return l.trim(); }).join(' |\n'); // one URL pattern per line
     var warns = [];
     var ast = parseExpr(body, function (w) { warns.push(w); });
     if (cur.kind === 'rule') {
+      var flat = body.replace(/\s+/g, ' ');
+      if ((/^(a|an|the|any|one)\s+\S/i.test(flat) && !/[\[\]()|*+<>]/.test(flat)) || /^<[^<>]*\s[^<>]*>$/.test(flat)) {
+        ast = { t: 'prose', text: flat.replace(/^<|>$/g, '') }; // a description in words, not grammar
+        warns = [];
+      }
       if (!rules[cur.name]) { rules[cur.name] = []; ruleOrder.push(cur.name); }
-      rules[cur.name].push({ ast: ast, text: body, section: cur.section, sub: cur.sub, line: cur.line });
+      rules[cur.name].push({ ast: ast, text: body, section: cur.section, sub: cur.sub, line: cur.line, notes: cur.notes });
       warns.forEach(function (w) { issues.warnings.push({ kind: 'rule', name: cur.name, msg: w }); });
     } else {
       var id = commands.length;
-      commands.push({ id: id, label: cmdLabel(ast, body), text: body, ast: ast, section: cur.section, line: cur.line, warns: warns });
+      commands.push({ id: id, label: cmdLabel(ast, body), text: body, ast: ast, section: cur.section, line: cur.line, warns: warns, notes: cur.notes });
       warns.forEach(function (w) { issues.warnings.push({ kind: 'cmd', id: id, msg: w }); });
     }
     cur = null;
@@ -157,16 +170,19 @@ function parseDoc(text) {
     if (/^\s*$/.test(ln)) { flush(); continue; }
     if ((m = /^<([A-Za-z][^<>]*)>\s*:{0,2}=\s*(.*)$/.exec(ln))) {
       flush();
-      cur = { kind: 'rule', name: m[1].trim(), lines: [cleanLine(m[2])], section: section, sub: sub, line: li + 1 };
+      cur = { kind: 'rule', name: m[1].trim(), lines: [cleanLine(m[2])], notes: [], section: section, sub: sub, line: li + 1 };
       continue;
     }
     if (/^(gam|stam)(\s|$)/.test(ln)) {
       flush();
-      cur = { kind: 'cmd', lines: [cleanLine(ln)], section: section, line: li + 1 };
+      cur = { kind: 'cmd', lines: [cleanLine(ln)], notes: [], section: section, line: li + 1 };
       continue;
     }
     if (/^\s+\S/.test(ln)) {
-      if (cur && !/^\s*(See:|Must match|Maximum of)/.test(ln)) cur.lines.push(cleanLine(ln));
+      if (cur) {
+        if (/^\s*(See:|Must match|Maximum of|<[^<>]+>\s+(must|can|may|is|are)\b)/.test(ln)) cur.notes.push(ln.trim()); // prose, not grammar
+        else cur.lines.push(cleanLine(ln));
+      }
       continue;
     }
     flush(); // unindented prose
@@ -175,15 +191,30 @@ function parseDoc(text) {
 
   var refs = {}, dups = [];
   function note(name, where) { (refs[name] = refs[name] || []).push(where); }
+  function lev(a, b) {
+    var p = [], i, j;
+    for (j = 0; j <= b.length; j++) p[j] = j;
+    for (i = 1; i <= a.length; i++) { var prev = p[0]; p[0] = i; for (j = 1; j <= b.length; j++) { var t = p[j]; p[j] = Math.min(p[j] + 1, p[j - 1] + 1, prev + (a[i - 1] === b[j - 1] ? 0 : 1)); prev = t; } }
+    return p[b.length];
+  }
   ruleOrder.forEach(function (name) {
-    rules[name].forEach(function (d) { walkNT(d.ast, function (v) { note(v, { kind: 'rule', name: name }); }); });
+    rules[name].forEach(function (d) { walkNT(d.ast, function (v) { note(v, { kind: 'rule', name: name, line: d.line }); }); });
     var uniq = {};
     rules[name].forEach(function (d) { uniq[d.text.replace(/\s+/g, ' ')] = 1; });
-    if (rules[name].length > 1) dups.push({ name: name, count: rules[name].length, identical: Object.keys(uniq).length === 1 });
+    if (rules[name].length > 1) dups.push({ name: name, count: rules[name].length, identical: Object.keys(uniq).length === 1, lines: rules[name].map(function (d) { return d.line; }) });
   });
-  commands.forEach(function (c) { walkNT(c.ast, function (v) { note(v, { kind: 'cmd', id: c.id }); }); });
+  commands.forEach(function (c) { walkNT(c.ast, function (v) { note(v, { kind: 'cmd', id: c.id, line: c.line }); }); });
   var undef = Object.keys(refs).filter(function (v) { return !rules[v]; })
-    .map(function (v) { return { name: v, uses: refs[v] }; })
+    .map(function (v) {
+      var best = null, bd = 99, lv = v.toLowerCase();
+      ruleOrder.forEach(function (n) {
+        var d = lev(lv, n.toLowerCase());
+        if (d < bd) { bd = d; best = n; }
+      });
+      var lim = v.length >= 8 ? 2 : 1;
+      var lines = refs[v].map(function (u) { return u.line; }).sort(function (a, b) { return a - b; });
+      return { name: v, uses: refs[v], suggest: bd <= lim ? best : null, line: lines[0] };
+    })
     .sort(function (a, b) { return b.uses.length - a.uses.length; });
   issues.undef = undef; issues.dups = dups;
   return { rules: rules, ruleOrder: ruleOrder, commands: commands, issues: issues };
@@ -324,11 +355,30 @@ function nEnum(words, maxw) {
     } };
 }
 
+function nNote(text, maxw) {
+  var words = text.split(' '), lines = [], line = '';
+  words.forEach(function (wd) {
+    if (line && tw(line + ' ' + wd) > maxw) { lines.push(line); line = wd; } else line = line ? line + ' ' + wd : wd;
+  });
+  if (line) lines.push(line);
+  var wmax = Math.max.apply(null, lines.map(tw).concat([tw('described in words')])), W = wmax + 28, H = (lines.length + 1) * 17 + 14;
+  return { w: W, up: H / 2, down: H / 2, path: function () { return ''; },
+    draw: function (x, y) {
+      var s = '<g class="rr-enum"><rect x="' + f(x) + '" y="' + f(y - H / 2) + '" width="' + f(W) + '" height="' + f(H) + '" rx="8"/>' +
+        '<text class="rr-enum-title" x="' + f(x + 14) + '" y="' + f(y - H / 2 + 20) + '">described in words</text>';
+      lines.forEach(function (l, i) {
+        s += '<text x="' + f(x + 14) + '" y="' + f(y - H / 2 + 20 + (i + 1) * 17) + '">' + esc(l) + '</text>';
+      });
+      return s + '</g>';
+    } };
+}
+
 function build(ast, limit) {
   limit = Math.max(limit, 240);
   switch (ast.t) {
     case 'term': return nTerm(ast.v);
     case 'nt': return nNT(ast.v);
+    case 'prose': return nNote(ast.text, Math.min(limit - 80, 520));
     case 'seq': {
       var kids = ast.items.map(function (c) { return build(c, limit); });
       if (!kids.length) return nSeq([]);
@@ -381,6 +431,7 @@ function toEBNF(n) {
   switch (n.t) {
     case 'term': return lit(n.v);
     case 'nt': return ident(n.v);
+    case 'prose': return '[#x21-#x7E]+';
     case 'seq': return n.items.length ? n.items.map(function (c) { return c.t === 'choice' ? toEBNF(c) : toEBNF(c); }).join(' ') : '""';
     case 'choice': return '(' + n.items.map(toEBNF).join(' | ') + ')';
     case 'opt': return n.item.t === 'seq' && !n.item.items.length ? '""' : grp(n.item) + '?';
@@ -415,4 +466,78 @@ function docToEBNF(doc) {
   return out.join('\n');
 }
 
-if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseExpr: parseExpr, tokenize: tokenize, renderSVG: renderSVG, docToEBNF: docToEBNF, build: build };
+
+/* ===== command explorer: which words can come next? ===== */
+var NO_EXPAND = { String: 1, Number: 1, Float: 1, Digit: 1, Character: 1, Hex: 1, Space: 1 };
+function isProse(ast) { return ast.t === 'seq' && ast.items.length >= 3 && ast.items.every(function (x) { return x.t === 'term'; }); }
+
+function exploreOne(ast, rules, verbs, full, pre, budget) {
+  var out = { next: {}, done: false, alive: false, over: false }, steps = 0, P = pre.toLowerCase();
+  function note(text, kind, via) { if (!out.next[text]) out.next[text] = { kind: kind, via: via }; out.alive = true; }
+  function m(n, i, stack, k) {
+    if (++steps > budget) { out.over = true; return; }
+    switch (n.t) {
+      case 'term':
+        if (i < full.length) { if (full[i].toLowerCase() === n.v.toLowerCase()) k(i + 1); }
+        else if (i === full.length && n.v.toLowerCase().indexOf(P) === 0) note(n.v, 'kw', stack[stack.length - 1]);
+        return;
+      case 'nt': {
+        var defs = rules[n.v];
+        if (i === full.length) note('<' + n.v + '>', 'val');
+        else if (!(i === 1 && verbs[full[i].toLowerCase()])) k(i + 1); // any single word may stand in for a value
+        if (defs && stack.length < 3 && stack.indexOf(n.v) < 0 && !NO_EXPAND[n.v]) {
+          var ns = stack.concat([n.v]);
+          for (var d = 0; d < defs.length; d++) if (!isProse(defs[d].ast) && defs[d].ast.t !== 'prose') m(defs[d].ast, i, ns, k);
+        }
+        return;
+      }
+      case 'seq':
+        (function go(idx, j) {
+          if (idx === n.items.length) return k(j);
+          m(n.items[idx], j, stack, function (j2) { go(idx + 1, j2); });
+        })(0, i);
+        return;
+      case 'choice': n.items.forEach(function (c) { m(c, i, stack, k); }); return;
+      case 'opt': m(n.item, i, stack, k); k(i); return;
+      case 'star': (function loop(j) { k(j); m(n.item, j, stack, function (j2) { if (j2 > j) loop(j2); }); })(i); return;
+      case 'plus': m(n.item, i, stack, function (j) { m({ t: 'star', item: n.item }, j, stack, k); }); return;
+    }
+  }
+  m(ast, 0, [], function (j) { if (j === full.length && pre === '') { out.done = true; out.alive = true; } });
+  return out;
+}
+
+function explore(doc, text) {
+  var trail = /\s$/.test(text), parts = text.trim().split(/\s+/).filter(Boolean), pre = '', full = parts;
+  if (!trail && parts.length) { pre = parts[parts.length - 1]; full = parts.slice(0, -1); }
+  if ((full.length === 0 && pre && 'gam'.indexOf(pre.toLowerCase()) !== 0) || (full.length > 0 && full[0].toLowerCase() !== 'gam')) full = ['gam'].concat(full);
+  if (!doc._verbs) {
+    var vb = {};
+    doc.commands.forEach(function (c) {
+      var it = c.ast.t === 'seq' ? c.ast.items[1] : null;
+      if (!it) return;
+      if (it.t === 'term') vb[it.v.toLowerCase()] = 1;
+      else if (it.t === 'choice') it.items.forEach(function (x) { if (x.t === 'term') vb[x.v.toLowerCase()] = 1; });
+    });
+    doc._verbs = vb;
+  }
+  var counts = {}, matches = [], over = false;
+  doc.commands.forEach(function (c) {
+    var last = c.ast.t === 'seq' ? c.ast.items[c.ast.items.length - 1] : null;
+    if (last && last.t === 'term' && last.v === '...') return; // documentation placeholder, matches anything
+    var r = exploreOne(c.ast, doc.rules, doc._verbs, full, pre, 6000);
+    if (r.over) over = true;
+    if (!r.alive) return;
+    matches.push({ id: c.id, done: r.done });
+    Object.keys(r.next).forEach(function (t) {
+      var e = counts[t] || (counts[t] = { text: t, kind: r.next[t].kind, count: 0 });
+      e.count++;
+    });
+  });
+  var next = Object.keys(counts).map(function (t) { return counts[t]; })
+    .filter(function (e) { return e.kind === 'val' || /[A-Za-z0-9]/.test(e.text); })
+    .sort(function (a, b) { return (a.kind === b.kind ? 0 : a.kind === 'kw' ? -1 : 1) || b.count - a.count || (a.text < b.text ? -1 : 1); });
+  return { full: full, pre: pre, next: next, matches: matches, over: over };
+}
+
+if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseExpr: parseExpr, tokenize: tokenize, renderSVG: renderSVG, docToEBNF: docToEBNF, explore: explore, build: build };

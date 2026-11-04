@@ -80,3 +80,6 @@ gam print users [todrive <ToDriveAttribute>*]
         [formatjson [quotechar <Character>]]
 gam <UserTypeEntity> print users [countsonly|countonly]
 gam checkconnection
+
+<Character> ::= a single character
+<Space> ::= an actual space character
