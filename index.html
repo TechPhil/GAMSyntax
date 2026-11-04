@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>GAM syntax viewer</title>
+<title>EBNF viewer</title>
 <style>
 :root{
   --bg:#eef1f4; --panel:#fbfcfd; --ink:#18222c; --muted:#5a6a78; --rule:#d3dae1; --hover:#e6ebf0; --sel:#dfe7fb;
@@ -41,6 +41,8 @@ button{cursor:pointer}
 .side-head h1{margin:0 0 2px;font-size:17px;font-weight:650;letter-spacing:-.01em}
 .src{margin:0;color:var(--muted);font-size:12.5px}
 .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.sel{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12.5px;min-width:0}
+.sel select{max-width:100%;border:1px solid var(--rule);background:var(--panel);color:var(--ink);border-radius:6px;padding:4px 6px;font-size:12.5px}
 .btn{border:1px solid var(--rule);background:var(--panel);border-radius:6px;padding:5px 10px;font-size:13px}
 .btn:hover{background:var(--hover)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -119,6 +121,8 @@ svg.rr{display:block}
 .rr-term rect{fill:var(--term-bg);stroke:var(--term-stroke);stroke-width:1.3}
 .rr-nt rect{fill:var(--nt-bg);stroke:var(--nt-stroke);stroke-width:1.3}
 .rr-nt{cursor:pointer}
+.rr-class rect{fill:var(--term-bg);stroke:var(--term-stroke);stroke-width:1.3;stroke-dasharray:4 3}
+.rr-label{font-family:var(--sans);font-size:12px;font-style:italic;fill:var(--muted)}
 .rr-nt:hover rect{stroke-width:2.4}
 .rr-enum rect{fill:none;stroke:var(--enum-stroke);stroke-dasharray:4 3}
 .rr-enum text.rr-enum-title{fill:var(--muted);font-family:var(--sans);font-size:12px}
@@ -134,16 +138,25 @@ svg.rr{display:block}
 <div class="app">
   <aside class="side">
     <div class="side-head">
-      <h1>GAM syntax viewer</h1>
+      <h1>EBNF viewer</h1>
       <p class="src" id="src"></p>
       <div class="row">
-        <button class="btn primary" id="openBtn" type="button">Open GAM file</button>
+        <button class="btn primary" id="openBtn" type="button">Open file</button>
         <button class="btn" id="pasteBtn" type="button">Paste text</button>
-        <input type="file" id="file" hidden accept=".txt,.md,.bnf,.text,text/*">
+        <input type="file" id="file" hidden accept=".txt,.md,.bnf,.ebnf,.abnf,.g4,.text,text/*">
+      </div>
+      <div class="row">
+        <label class="sel">Syntax <select id="dialect" aria-label="Grammar syntax">
+          <option value="auto">Auto-detect</option>
+          <option value="ebnf">EBNF / BNF (W3C, ISO, ANTLR style)</option>
+          <option value="abnf">ABNF (RFC 5234)</option>
+          <option value="informal">Informal usage lines (command syntax)</option>
+        </select></label>
+        <label class="sel">Examples <select id="samples" aria-label="Load an example"></select></label>
       </div>
     </div>
     <div class="tabs" role="tablist" id="tabs"></div>
-    <input class="search" id="q" type="search" placeholder="Filter, e.g. print users" aria-label="Filter">
+    <input class="search" id="q" type="search" placeholder="Filter" aria-label="Filter">
     <div class="list" id="list"></div>
   </aside>
   <main class="main" id="main">
@@ -152,9 +165,9 @@ svg.rr{display:block}
   </main>
 </div>
 
-<div class="panel" id="panel" role="dialog" aria-modal="true" aria-label="Paste GAM syntax">
+<div class="panel" id="panel" role="dialog" aria-modal="true" aria-label="Paste a grammar">
   <div class="panel-box">
-    <h2>Paste the GAM syntax text</h2>
+    <h2>Paste a grammar</h2>
     <p class="src">Everything stays in your browser.</p>
     <textarea id="paste" spellcheck="false"></textarea>
     <div class="row">
@@ -165,7 +178,7 @@ svg.rr{display:block}
 </div>
 
 <script>
-/* ===== GAM BNF core: tokenizer, parser, railroad layout, EBNF export ===== */
+/* ===== EBNF viewer core: dialect parsers (EBNF, ABNF, informal usage syntax), railroad layout, EBNF export ===== */
 var tw = function (s) { return s.length * 7.6; }; // replaced by canvas measure in the browser
 
 var NT_RE = /^<[A-Za-z][A-Za-z0-9_\/ .\-]*>/;
@@ -272,6 +285,7 @@ function walkNT(n, fn) {
   if (n.t === 'nt') fn(n.v);
   else if (n.items) n.items.forEach(function (c) { walkNT(c, fn); });
   else if (n.item) walkNT(n.item, fn);
+  else if (n.a) { walkNT(n.a, fn); walkNT(n.b, fn); }
 }
 
 function cleanLine(ln) {
@@ -296,8 +310,13 @@ function cmdLabel(ast, text) {
   return out.join(' ') || text.slice(0, 40);
 }
 
-function parseDoc(text) {
+function parseInformal(text) {
   var lines = text.replace(/\r/g, '').split('\n');
+  var counts = {}, ruleRe0 = /^<[A-Za-z][^<>]*>\s*:{0,2}=/;
+  lines.forEach(function (l) { var m0 = /^([a-z][\w-]*)(\s|$)/.exec(l); if (m0 && !ruleRe0.test(l)) counts[m0[1]] = (counts[m0[1]] || 0) + 1; });
+  var prefix = null, bestN = 1;
+  Object.keys(counts).forEach(function (k) { if (counts[k] > bestN) { bestN = counts[k]; prefix = k; } });
+  var cmdRe = prefix ? new RegExp('^' + prefix.replace(/[^\w-]/g, '') + '(\\s|$)') : null;
   var rules = {}, ruleOrder = [], commands = [], issues = { warnings: [] };
   var section = '', sub = '', cur = null;
 
@@ -340,7 +359,7 @@ function parseDoc(text) {
       cur = { kind: 'rule', name: m[1].trim(), lines: [cleanLine(m[2])], notes: [], section: section, sub: sub, line: li + 1 };
       continue;
     }
-    if (/^(gam|stam)(\s|$)/.test(ln)) {
+    if (cmdRe && cmdRe.test(ln)) {
       flush();
       cur = { kind: 'cmd', lines: [cleanLine(ln)], notes: [], section: section, line: li + 1 };
       continue;
@@ -356,6 +375,11 @@ function parseDoc(text) {
   }
   flush();
 
+  return { rules: rules, ruleOrder: ruleOrder, commands: commands, issues: issues, prefix: prefix };
+}
+
+function analyze(doc, builtin) {
+  var rules = doc.rules, ruleOrder = doc.ruleOrder, commands = doc.commands, issues = doc.issues;
   var refs = {}, dups = [];
   function note(name, where) { (refs[name] = refs[name] || []).push(where); }
   function lev(a, b) {
@@ -371,7 +395,7 @@ function parseDoc(text) {
     if (rules[name].length > 1) dups.push({ name: name, count: rules[name].length, identical: Object.keys(uniq).length === 1, lines: rules[name].map(function (d) { return d.line; }) });
   });
   commands.forEach(function (c) { walkNT(c.ast, function (v) { note(v, { kind: 'cmd', id: c.id, line: c.line }); }); });
-  var undef = Object.keys(refs).filter(function (v) { return !rules[v]; })
+  var undef = Object.keys(refs).filter(function (v) { return !rules[v] && !(builtin && builtin[v.toUpperCase()]); })
     .map(function (v) {
       var best = null, bd = 99, lv = v.toLowerCase();
       ruleOrder.forEach(function (n) {
@@ -384,7 +408,290 @@ function parseDoc(text) {
     })
     .sort(function (a, b) { return b.uses.length - a.uses.length; });
   issues.undef = undef; issues.dups = dups;
-  return { rules: rules, ruleOrder: ruleOrder, commands: commands, issues: issues };
+  issues.unused = ruleOrder.filter(function (n, k) { return !refs[n] && k > 0; });
+}
+
+
+/* ===== generic EBNF (W3C, ISO 14977, ANTLR-ish, plain BNF) ===== */
+var EMPTY = { t: 'seq', items: [] };
+
+function stripComments(text, mode) {
+  var out = '', i = 0, n = text.length, q = null;
+  function blank(seg) { return seg.replace(/[^\n]/g, ' '); }
+  function toEol(from) { var e = text.indexOf('\n', from); return e < 0 ? n : e; }
+  while (i < n) {
+    var c = text[i], d = text[i + 1];
+    if (q) {
+      out += c;
+      if (c === '\\' && mode === 'ebnf' && d !== undefined && d !== '\n') { out += d; i += 2; continue; }
+      if (c === q || c === '\n') q = null;
+      i++; continue;
+    }
+    if (c === '"' || (c === "'" && mode === 'ebnf')) { q = c; out += c; i++; continue; }
+    if (mode === 'ebnf') {
+      if ((c === '(' && d === '*') || (c === '/' && d === '*')) {
+        var close = c === '(' ? '*)' : '*/', e = text.indexOf(close, i + 2), seg = e < 0 ? text.slice(i) : text.slice(i, e + 2);
+        out += blank(seg); i += seg.length; continue;
+      }
+      if (c === '/' && d === '/') { var e2 = toEol(i); out += blank(text.slice(i, e2)); i = e2; continue; }
+      if (c === '#' && (i === 0 || /\s/.test(text[i - 1])) && !/^#x[0-9A-Fa-f]/.test(text.slice(i, i + 3))) { var e3 = toEol(i); out += blank(text.slice(i, e3)); i = e3; continue; }
+    } else if (c === ';') { var e4 = toEol(i); out += blank(text.slice(i, e4)); i = e4; continue; }
+    out += c; i++;
+  }
+  return out;
+}
+
+var RULE_START = /^[ \t]*(?:(?:fragment|public|private)\s+)?(?:(<[^<>\n]+>|[A-Za-z_][\w\-]*)[ \t]*(::=|:=|<-|←|:)|((?:[A-Za-z_][\w\-]*[ \t]+)*[A-Za-z_][\w\-]*)[ \t]*(=))(?![=:>])[ \t]*/;
+
+function splitTopLevel(body) { // cut at ';' outside quotes and brackets
+  var parts = [], cur = '', q = null, depth = 0;
+  for (var i = 0; i < body.length; i++) {
+    var c = body[i];
+    if (q) { cur += c; if (c === '\\') { cur += body[i + 1] || ''; i++; } else if (c === q || c === '\n') q = null; continue; }
+    if (c === '"' || c === "'") { q = c; cur += c; continue; }
+    if (c === '(' || c === '[' || c === '{') depth++;
+    if (c === ')' || c === ']' || c === '}') depth = Math.max(0, depth - 1);
+    if (c === ';' && depth === 0) { parts.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  parts.push(cur);
+  return parts;
+}
+
+function isClassBody(c) {
+  if (!c || /\s/.test(c) || c.length < 2) return false;
+  if (/^[A-Za-z_]\w*(-\w+)+$/.test(c) && c.split('-').every(function (x) { return x.length >= 3; })) return false; // key-value style name, not a range
+  return c[0] === '^' || /#x[0-9A-Fa-f]/.test(c) || /\\/.test(c) || /[^\s\]]-[^\s\]]/.test(c);
+}
+
+function tokE(s, multi) {
+  var toks = [], i = 0, n = s.length, m;
+  function push(t, start, end) { t.sp = start === 0 || /\s/.test(s[start - 1]); t.raw = s.slice(start, end); toks.push(t); }
+  while (i < n) {
+    var c = s[i];
+    if (/\s/.test(c) || c === ',') { i++; continue; }
+    if (c === '"' || c === "'") {
+      var j = i + 1;
+      while (j < n && s[j] !== c && s[j] !== '\n') { if (s[j] === '\\') j++; j++; }
+      if (s[j] === c) {
+        var v = s.slice(i + 1, j).replace(/\\(.)/g, '$1'), end = j + 1;
+        var rm = /^\s*\.\.\s*(['"])((?:\\.|[^\\])*?)\1/.exec(s.slice(end));
+        if (rm) { push({ k: 'cls', v: '[' + v + '-' + rm[2] + ']' }, i, end + rm[0].length); i = end + rm[0].length; continue; }
+        push({ k: 'str', v: v }, i, end); i = end; continue;
+      }
+      push({ k: 'sym', v: c }, i, i + 1); i++; continue;
+    }
+    if (c === '<' && (m = /^<([^<>\n]+)>/.exec(s.slice(i, i + 200)))) { push({ k: 'nt', v: m[1].trim() }, i, i + m[0].length); i += m[0].length; continue; }
+    if (c === '[') {
+      var k = s.indexOf(']', i + 1);
+      if (k > 0 && isClassBody(s.slice(i + 1, k))) { push({ k: 'cls', v: s.slice(i, k + 1) }, i, k + 1); i = k + 1; continue; }
+    }
+    if (c === '#' && (m = /^#x[0-9A-Fa-f]+/.exec(s.slice(i, i + 12)))) { push({ k: 'hex', v: m[0] }, i, i + m[0].length); i += m[0].length; continue; }
+    if ('(){}[]|/?*+~'.indexOf(c) >= 0) { push({ k: c }, i, i + 1); i++; continue; }
+    if (c === '-') { push({ k: '-' }, i, i + 1); i++; continue; }
+    if ((m = /^\d+/.exec(s.slice(i, i + 12)))) { push({ k: 'num', v: m[0] }, i, i + m[0].length); i += m[0].length; continue; }
+    var mw = null;
+    if (multi) for (var q = 0; q < multi.length; q++) if (s.substr(i, multi[q].length) === multi[q] && !/[\w\-]/.test(s[i + multi[q].length] || ' ') && (i === 0 || !/[\w\-]/.test(s[i - 1]))) { mw = multi[q]; break; }
+    if (mw) { push({ k: 'id', v: mw }, i, i + mw.length); i += mw.length; continue; }
+    if ((m = /^[A-Za-z_]\w*(?:-(?=[A-Za-z_\d])\w*)*/.exec(s.slice(i, i + 120)))) { push({ k: 'id', v: m[0] }, i, i + m[0].length); i += m[0].length; continue; }
+    push({ k: 'sym', v: c }, i, i + 1); i++;
+  }
+  return toks;
+}
+
+function parseE(s, warn, multi) {
+  var toks = tokE(s, multi), p = 0;
+  warn = warn || function () {};
+  function expect(k) { if (toks[p] && toks[p].k === k) p++; else warn('missing ' + k); }
+  function item() {
+    var t = toks[p], node;
+    if (t.k === '~') { p++; return toks[p] ? { t: 'not', item: item() } : { t: 'term', v: '~' }; }
+    if (t.k === 'num' && toks[p + 1] && toks[p + 1].k === '*') { p += 2; return toks[p] ? { t: 'rep', min: +t.v, max: +t.v, item: item() } : { t: 'term', v: t.v + '*' }; }
+    if (t.k === '(') { p++; var g = alts(1); expect(')'); node = g || EMPTY; }
+    else if (t.k === '[') { p++; var g2 = alts(1); expect(']'); node = { t: 'opt', item: g2 || EMPTY }; }
+    else if (t.k === '{') { p++; var g3 = alts(1); expect('}'); node = { t: 'star', item: g3 || EMPTY }; }
+    else if (t.k === '?') {
+      var q = -1; for (var z = p + 1; z < toks.length; z++) if (toks[z].k === '?') { q = z; break; }
+      if (q > 0) { node = { t: 'prose', text: toks.slice(p + 1, q).map(function (x) { return x.raw; }).join(' ') }; p = q + 1; }
+      else { node = { t: 'term', v: '?' }; p++; }
+    }
+    else {
+      if (t.k === 'str') node = { t: 'term', v: t.v };
+      else if (t.k === 'hex') node = { t: 'term', v: t.v, raw: true };
+      else if (t.k === 'cls') node = { t: 'cls', v: t.v };
+      else if (t.k === 'nt' || t.k === 'id') node = { t: 'nt', v: t.v };
+      else node = { t: 'term', v: t.v || t.k };
+      p++;
+    }
+    while (p < toks.length && (toks[p].k === '?' || toks[p].k === '*' || toks[p].k === '+') && !toks[p].sp) {
+      node = { t: toks[p].k === '?' ? 'opt' : toks[p].k === '*' ? 'star' : 'plus', item: node }; p++;
+    }
+    while (p + 1 < toks.length && toks[p].k === '-') { p++; node = { t: 'except', a: node, b: item() }; }
+    return node;
+  }
+  function alts(depth) {
+    var as = [], seq = [];
+    while (p < toks.length) {
+      var t = toks[p];
+      if (t.k === ')' || t.k === ']' || t.k === '}') {
+        if (depth > 0) break;
+        warn('unmatched ' + t.k); seq.push({ t: 'term', v: t.k }); p++; continue;
+      }
+      if (t.k === '|' || t.k === '/') { as.push(mkSeq(seq)); seq = []; p++; continue; }
+      seq.push(item());
+    }
+    as.push(mkSeq(seq));
+    return mkChoice(as);
+  }
+  return alts(0) || EMPTY;
+}
+
+function parseEBNF(text) {
+  var lines = stripComments(text.replace(/\r/g, ''), 'ebnf').split('\n');
+  var rules = {}, ruleOrder = [], warnings = [], chunks = [], cur = null, m;
+  lines.forEach(function (ln, li) {
+    if ((m = RULE_START.exec(ln))) { cur = { name: (m[1] || m[3]).replace(/^<|>$/g, '').replace(/\s+/g, ' ').trim(), sep: m[2] || m[4], body: ln.slice(m[0].length), line: li + 1 }; chunks.push(cur); }
+    else if (cur) cur.body += '\n' + ln;
+  });
+  var all = [];
+  chunks.forEach(function (ch) {
+    var parts = splitTopLevel(ch.body);
+    all.push({ name: ch.name, sep: ch.sep, body: parts[0], line: ch.line });
+    for (var k = 1; k < parts.length; k++) {
+      var m2 = RULE_START.exec(parts[k].replace(/^\s+/, ''));
+      if (m2) all.push({ name: (m2[1] || m2[3]).replace(/^<|>$/g, '').replace(/\s+/g, ' ').trim(), sep: m2[2] || m2[4], body: parts[k].replace(/^\s+/, '').slice(m2[0].length), line: ch.line });
+    }
+  });
+  var multi = [];
+  all.forEach(function (r) { if (/ /.test(r.name) && multi.indexOf(r.name) < 0) multi.push(r.name); });
+  multi.sort(function (a, b) { return b.length - a.length; }); // ISO style: names may contain spaces
+  all.forEach(function (r) {
+    var body = r.body.trim();
+    if (r.sep === '=' && /[\w"')\]}]\s*\.$/.test(body)) body = body.replace(/\s*\.$/, ''); // Wirth-style terminator
+    var warns = [], ast = parseE(body, function (w) { warns.push(w); }, multi);
+    if (!rules[r.name]) { rules[r.name] = []; ruleOrder.push(r.name); }
+    rules[r.name].push({ ast: ast, text: body, section: '', sub: '', line: r.line, notes: [] });
+    warns.forEach(function (w) { warnings.push({ kind: 'rule', name: r.name, msg: w }); });
+  });
+  return { rules: rules, ruleOrder: ruleOrder, commands: [], issues: { warnings: warnings }, prefix: null };
+}
+
+/* ===== ABNF (RFC 5234) ===== */
+var ABNF_CORE = { ALPHA: 1, BIT: 1, CHAR: 1, CR: 1, CRLF: 1, CTL: 1, DIGIT: 1, DQUOTE: 1, HEXDIG: 1, HTAB: 1, LF: 1, LWSP: 1, OCTET: 1, SP: 1, VCHAR: 1, WSP: 1 };
+
+function hexOf(num, base) { var v = parseInt(num, base); return '#x' + (v < 16 ? '0' : '') + v.toString(16).toUpperCase(); }
+
+function tokA(s) {
+  var toks = [], i = 0, n = s.length, m;
+  function push(t, st, en) { t.sp = st === 0 || /\s/.test(s[st - 1]); t.raw = s.slice(st, en); toks.push(t); }
+  while (i < n) {
+    var c = s[i];
+    if (/\s/.test(c)) { i++; continue; }
+    if ((m = /^(?:%[si])?"([^"\n]*)"/.exec(s.slice(i)))) { push({ k: 'str', v: m[1] }, i, i + m[0].length); i += m[0].length; continue; }
+    if ((m = /^%([xdbXDB])([0-9A-Fa-f]+)(-[0-9A-Fa-f]+|(?:\.[0-9A-Fa-f]+)+)?/.exec(s.slice(i)))) {
+      var base = { x: 16, d: 10, b: 2 }[m[1].toLowerCase()], nodeV;
+      if (m[3] && m[3][0] === '-') nodeV = { k: 'cls', v: '[' + hexOf(m[2], base) + '-' + hexOf(m[3].slice(1), base) + ']' };
+      else nodeV = { k: 'hexs', v: [m[2]].concat(m[3] ? m[3].slice(1).split('.') : []).map(function (x) { return hexOf(x, base); }) };
+      push(nodeV, i, i + m[0].length); i += m[0].length; continue;
+    }
+    if (c === '<' && (m = /^<([^<>\n]*)>/.exec(s.slice(i, i + 200)))) { push({ k: 'prose', v: m[1].trim() }, i, i + m[0].length); i += m[0].length; continue; }
+    if ('()[]/*'.indexOf(c) >= 0) { push({ k: c }, i, i + 1); i++; continue; }
+    if ((m = /^\d+/.exec(s.slice(i, i + 12)))) { push({ k: 'num', v: m[0] }, i, i + m[0].length); i += m[0].length; continue; }
+    if ((m = /^[A-Za-z][A-Za-z0-9\-]*/.exec(s.slice(i, i + 120)))) { push({ k: 'id', v: m[0] }, i, i + m[0].length); i += m[0].length; continue; }
+    push({ k: 'sym', v: c }, i, i + 1); i++;
+  }
+  return toks;
+}
+
+function parseA(s, warn) {
+  var toks = tokA(s), p = 0;
+  warn = warn || function () {};
+  function expect(k) { if (toks[p] && toks[p].k === k) p++; else warn('missing ' + k); }
+  function element() {
+    var t = toks[p], node;
+    if (t.k === '(') { p++; var g = alts(1); expect(')'); return g || EMPTY; }
+    if (t.k === '[') { p++; var g2 = alts(1); expect(']'); return { t: 'opt', item: g2 || EMPTY }; }
+    p++;
+    if (t.k === 'str') return { t: 'term', v: t.v };
+    if (t.k === 'cls') return { t: 'cls', v: t.v };
+    if (t.k === 'hexs') return mkSeq(t.v.map(function (h) { return { t: 'term', v: h, raw: true }; }));
+    if (t.k === 'prose') return { t: 'prose', text: t.v || 'prose' };
+    if (t.k === 'id') return { t: 'nt', v: t.v };
+    return { t: 'term', v: t.v || t.k };
+  }
+  function item() {
+    var t = toks[p], mn = null, mx = null;
+    if (t.k === 'num') {
+      var nx = toks[p + 1];
+      if (nx && nx.k === '*' && !nx.sp) {
+        p += 2; mn = +t.v;
+        if (toks[p] && toks[p].k === 'num' && !toks[p].sp) { mx = +toks[p].v; p++; } else mx = Infinity;
+      } else if (nx && !nx.sp && nx.k !== '/') { p++; mn = mx = +t.v; }
+    } else if (t.k === '*') {
+      p++; mn = 0;
+      if (toks[p] && toks[p].k === 'num' && !toks[p].sp) { mx = +toks[p].v; p++; } else mx = Infinity;
+    }
+    if (mn !== null && !toks[p]) return { t: 'term', v: t.raw };
+    var el = element();
+    return mn === null ? el : { t: 'rep', min: mn, max: mx, item: el };
+  }
+  function alts(depth) {
+    var as = [], seq = [];
+    while (p < toks.length) {
+      var t = toks[p];
+      if (t.k === ')' || t.k === ']') {
+        if (depth > 0) break;
+        warn('unmatched ' + t.k); seq.push({ t: 'term', v: t.k }); p++; continue;
+      }
+      if (t.k === '/') { as.push(mkSeq(seq)); seq = []; p++; continue; }
+      seq.push(item());
+    }
+    as.push(mkSeq(seq));
+    return mkChoice(as);
+  }
+  return alts(0) || EMPTY;
+}
+
+function parseABNF(text) {
+  var lines = stripComments(text.replace(/\r/g, ''), 'abnf').split('\n');
+  var rules = {}, ruleOrder = [], warnings = [], cur = null, chunks = [], m;
+  lines.forEach(function (ln, li) {
+    if ((m = /^([A-Za-z][\w\-]*)[ \t]*(=\/?)[ \t]*(.*)$/.exec(ln))) { cur = { name: m[1], inc: m[2] === '=/', body: m[3], line: li + 1 }; chunks.push(cur); }
+    else if (cur && /^\s+\S/.test(ln)) cur.body += '\n' + ln;
+    else if (/^\S/.test(ln)) cur = null;
+  });
+  chunks.forEach(function (ch) {
+    var body = ch.body.trim(), warns = [], ast = parseA(body, function (w) { warns.push(w); });
+    if (ch.inc && rules[ch.name]) {
+      var d = rules[ch.name][0];
+      d.ast = mkChoice([d.ast, ast]); d.text += ' /\n' + body;
+    } else {
+      if (!rules[ch.name]) { rules[ch.name] = []; ruleOrder.push(ch.name); }
+      rules[ch.name].push({ ast: ast, text: body, section: '', sub: '', line: ch.line, notes: [] });
+    }
+    warns.forEach(function (w) { warnings.push({ kind: 'rule', name: ch.name, msg: w }); });
+  });
+  return { rules: rules, ruleOrder: ruleOrder, commands: [], issues: { warnings: warnings }, prefix: null };
+}
+
+/* ===== dialect detection and entry point ===== */
+function detectDialect(text) {
+  if (/%[xdbXDB][0-9A-Fa-f]/.test(text) || /^[A-Za-z][\w-]*[ \t]*=\/[ \t]/m.test(text)) return 'abnf';
+  var counts = {}, top = 0;
+  text.replace(/\r/g, '').split('\n').forEach(function (l) {
+    var m = /^([a-z][\w-]*)(\s|$)/.exec(l);
+    if (m && !RULE_START.test(l)) { counts[m[1]] = (counts[m[1]] || 0) + 1; if (counts[m[1]] > top) top = counts[m[1]]; }
+  });
+  return top >= 3 ? 'informal' : 'ebnf';
+}
+
+function parseDoc(text, dialect) {
+  var d = !dialect || dialect === 'auto' ? detectDialect(text) : dialect;
+  var doc = d === 'informal' ? parseInformal(text) : d === 'abnf' ? parseABNF(text) : parseEBNF(text);
+  doc.dialect = d; doc.start = doc.ruleOrder[0] || null;
+  doc.builtin = d === 'abnf' ? ABNF_CORE : null;
+  analyze(doc, doc.builtin);
+  return doc;
 }
 
 /* ===== railroad layout ===== */
@@ -461,17 +768,32 @@ function nChoice(items) {
     } };
 }
 
-function nLoop(item) {
-  var w = item.w + 40, ret = item.down + 18;
+function nLabel(text) {
+  var w = tw(text) + 10;
+  return { w: w, up: 13, down: 13, path: function (x, y) { return hline(x, x + w, y); },
+    draw: function (x, y) { return '<text class="rr-label" x="' + f(x + w / 2) + '" y="' + f(y - 6) + '" text-anchor="middle">' + esc(text) + '</text>'; } };
+}
+function nClass(v) {
+  var w = Math.max(26, tw(v) + 22);
+  return { w: w, up: 13, down: 13, path: function () { return ''; },
+    draw: function (x, y) {
+      return '<g class="rr-class"><rect x="' + f(x) + '" y="' + f(y - 13) + '" width="' + f(w) + '" height="26" rx="3"/>' +
+        '<text x="' + f(x + w / 2) + '" y="' + f(y + 4.5) + '" text-anchor="middle">' + esc(v) + '</text></g>';
+    } };
+}
+function nLoop(item, cap) {
+  var w = item.w + 40, ret = item.down + 18 + (cap ? 14 : 0);
   return { w: w, up: item.up, down: ret,
     path: function (x, y) {
-      var ry = y + ret;
+      var ry = y + ret - (cap ? 14 : 0);
       return hline(x, x + 20, y) + hline(x + 20 + item.w, x + w, y) + item.path(x + 20, y) +
         'M' + f(x + 10) + ' ' + f(y) + 'a' + R + ' ' + R + ' 0 0 0 -' + R + ' ' + R + 'V' + f(ry - R) +
         'a' + R + ' ' + R + ' 0 0 0 ' + R + ' ' + R + 'H' + f(x + w - R) +
         'a' + R + ' ' + R + ' 0 0 0 ' + R + ' -' + R + 'V' + f(y + R) + 'a' + R + ' ' + R + ' 0 0 0 -' + R + ' -' + R;
     },
-    draw: function (x, y) { return item.draw(x + 20, y); } };
+    draw: function (x, y) {
+      return item.draw(x + 20, y) + (cap ? '<text class="rr-label" x="' + f(x + w / 2) + '" y="' + f(y + ret - 4) + '" text-anchor="middle">' + esc(cap) + '</text>' : '');
+    } };
 }
 
 function nStack(rows) {
@@ -546,6 +868,19 @@ function build(ast, limit) {
     case 'term': return nTerm(ast.v);
     case 'nt': return nNT(ast.v);
     case 'prose': return nNote(ast.text, Math.min(limit - 80, 520));
+    case 'cls': return nClass(ast.v);
+    case 'except': return nSeq([build(ast.a, limit - 60), nLabel('except'), build(ast.b, limit - 60)]);
+    case 'not': return nSeq([nLabel('not'), build(ast.item, limit - 60)]);
+    case 'rep': {
+      var rmin = ast.min, rmax = ast.max;
+      if (rmin === 1 && rmax === 1) return build(ast.item, limit);
+      if (rmin === 0 && rmax === 1) return build({ t: 'opt', item: ast.item }, limit);
+      if (rmin === 0 && rmax === Infinity) return build({ t: 'star', item: ast.item }, limit);
+      if (rmin === 1 && rmax === Infinity) return build({ t: 'plus', item: ast.item }, limit);
+      var cap = (rmin === rmax ? rmin : rmin + '\u2013' + (rmax === Infinity ? '\u221e' : rmax)) + '\u00d7';
+      var lp = nLoop(build(ast.item, limit - 60), cap);
+      return rmin === 0 ? nChoice([nSkip(), lp]) : lp;
+    }
     case 'seq': {
       var kids = ast.items.map(function (c) { return build(c, limit); });
       if (!kids.length) return nSeq([]);
@@ -596,7 +931,16 @@ function lit(v) { return v.indexOf('"') >= 0 ? "'" + v.replace(/'/g, '') + "'" :
 function toEBNF(n) {
   function grp(c) { return c.t === 'seq' && c.items.length > 1 ? '(' + toEBNF(c) + ')' : toEBNF(c); }
   switch (n.t) {
-    case 'term': return lit(n.v);
+    case 'term': return n.raw ? n.v : lit(n.v);
+    case 'cls': return n.v;
+    case 'except': return '(' + toEBNF(n.a) + ' - ' + toEBNF(n.b) + ')';
+    case 'not': return '/* not */ ' + toEBNF(n.item);
+    case 'rep': {
+      var base = grp(n.item), rn = n.min, rx = n.max, rpt = function (b, k) { return k <= 0 ? '' : new Array(k + 1).join(b + ' ').trim(); };
+      if (rx === Infinity) return rn === 0 ? base + '*' : rn === 1 ? base + '+' : rpt(base, rn - 1) + ' ' + base + '+';
+      if (rn === rx) return rn === 0 ? '""' : rpt(base, rn);
+      return (rpt(base, rn) + ' ' + new Array(rx - rn + 1).join(base + '? ')).trim();
+    }
     case 'nt': return ident(n.v);
     case 'prose': return '[#x21-#x7E]+';
     case 'seq': return n.items.length ? n.items.map(function (c) { return c.t === 'choice' ? toEBNF(c) : toEBNF(c); }).join(' ') : '""';
@@ -608,7 +952,7 @@ function toEBNF(n) {
   return '""';
 }
 function docToEBNF(doc) {
-  var out = ['/* Cleaned from the GAM syntax document. W3C EBNF. */', ''];
+  var out = ['/* Converted to W3C EBNF from ' + ({ ebnf: 'EBNF', abnf: 'ABNF', informal: 'informal usage syntax' }[doc.dialect] || 'source') + '. */', ''];
   doc.ruleOrder.forEach(function (name) {
     var seen = {}, alts = [];
     doc.rules[name].forEach(function (d) {
@@ -617,7 +961,7 @@ function docToEBNF(doc) {
     });
     out.push(ident(name) + ' ::= ' + (alts.length === 1 ? alts[0] : alts.map(function (a) { return '(' + a + ')'; }).join(' | ')));
   });
-  out.push('', '/* commands */');
+  if (doc.commands.length) out.push('', '/* commands */');
   var names = [];
   doc.commands.forEach(function (c) {
     var nm = 'cmd_' + (c.id + 1);
@@ -625,7 +969,7 @@ function docToEBNF(doc) {
     out.push('/* ' + c.label.replace(/\*\//g, '') + ' */');
     out.push(nm + ' ::= ' + toEBNF(c.ast));
   });
-  out.push('', 'gam_command ::= ' + (names.join(' | ') || '""'));
+  if (names.length) out.push('', (doc.prefix || 'gam') + '_command ::= ' + names.join(' | '));
   if (doc.issues.undef.length) {
     out.push('', '/* referenced but never defined in the source: stubbed so the grammar compiles */');
     doc.issues.undef.forEach(function (u) { out.push(ident(u.name) + ' ::= [#x21-#x7E]+'); });
@@ -677,7 +1021,8 @@ function exploreOne(ast, rules, verbs, full, pre, budget) {
 function explore(doc, text) {
   var trail = /\s$/.test(text), parts = text.trim().split(/\s+/).filter(Boolean), pre = '', full = parts;
   if (!trail && parts.length) { pre = parts[parts.length - 1]; full = parts.slice(0, -1); }
-  if ((full.length === 0 && pre && 'gam'.indexOf(pre.toLowerCase()) !== 0) || (full.length > 0 && full[0].toLowerCase() !== 'gam')) full = ['gam'].concat(full);
+  var PF = doc.prefix || 'gam';
+  if ((full.length === 0 && pre && PF.indexOf(pre.toLowerCase()) !== 0) || (full.length > 0 && full[0].toLowerCase() !== PF)) full = [PF].concat(full);
   if (!doc._verbs) {
     var vb = {};
     doc.commands.forEach(function (c) {
@@ -707,34 +1052,42 @@ function explore(doc, text) {
   return { full: full, pre: pre, next: next, matches: matches, over: over };
 }
 
-if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseExpr: parseExpr, tokenize: tokenize, renderSVG: renderSVG, docToEBNF: docToEBNF, explore: explore, build: build };
+if (typeof module !== 'undefined') module.exports = { detectDialect: detectDialect, parseDoc: parseDoc, parseExpr: parseExpr, tokenize: tokenize, renderSVG: renderSVG, docToEBNF: docToEBNF, explore: explore, build: build };
 
 </script>
 <script>
 (function () {
-  var SAMPLE = "This document describes the GAM command line syntax in modified BNF, see https://en.wikipedia.org/wiki/Backus-Naur_Form\n\n[] optional item\n() group items\n* item may appear zero or more times\n+ item may appear one or more times\n| separates alternative items\n\n## Primitives\n\n<Digit> ::= 0|1|2|3|4|5|6|7|8|9\n<Number> ::= <Digit>+\n<Float> ::= <Digit>*.<Digit>+\n<String> ::= a string of characters, surrounded by \" if it contains spaces\n<FalseValues>= false|off|no|disabled|0\n<TrueValues> ::= true|on|yes|enabled|1\n<Boolean> ::= <TrueValues>|<FalseValues>\n<CalendarColorIndex> ::= <Number in range 1-24>\n<EventColorName> ::=\n        banana|basil|blueberry|flamingo|graphite|grape|\n        lavender|peacock|sage|tangerine|tomato\n<LabelTextColorHex> ::=\n        #04502e|#094228|#0b4f30|#0d3472|#0d3b44|#3d188e|\n        #464646|#594c05|#662e37|#684e07|#711a36|#7a2e0b|\n        #7a4706|#8a1c0a|#994a64|#ffffff\n<DayOfWeek> ::= mon|tue|wed|thu|fri|sat|sun\n<Locale> ::=\n        ''|    #Not defined\n        ar-eg| #Arabic, Egypt\n        az-az| #Azerbaijani, Azerbaijan\n        be-by| #Belarusian, Belarus\n        bg-bg| #Bulgarian, Bulgaria\n        bn-in| #Bengali, India\n        ca-es| #Catalan, Spain\n        cs-cz| #Czech, Czech Republic\n        cy-gb| #Welsh, United Kingdom\n        da-dk| #Danish, Denmark\n        de-ch| #German, Switzerland\n        de-de  #German, Germany\n<RESubstitution> ::= <String>>\n<EmailAddress> ::= <String>@<DomainName>\n<DomainName> ::= <String>(.<String>)+\n<UserItem> ::= <EmailAddress>|<UniqueID>|<String>\n<UserList> ::= \"<UserItem>(,<UserItem>)*\"\n<FileName> ::= <String>\n<Charset> ::= ascii|latin1|mbcs|utf-8|utf-8-sig|utf-16|<String>\n<FileSelector> ::=\n        file ((<FileName> [charset <Charset>])|\n              (gdoc <UserGoogleDoc>)|\n              (gcsdoc <StorageBucketObjectName>))\n             [delimiter <Character>]\n<UserTypeEntity> ::=\n        (all users|users_na|users_arch)|\n        (user <UserItem>)|\n        (users <UserList>)|\n        (query <QueryUser>)|\n        <FileSelector>\n\n# Aliases\n\ngam create|add alias|aliases <EmailAddressEntity> user|group|target <UniqueID>|<EmailAddress>\n        [verifynotinvitable]\ngam delete alias|aliases [user|group|target] <EmailAddressEntity>\n\n# Calendars\n\ngam calendar|calendars <CalendarEntity> create|add event [id <String>] <EventAttribute>+ [<EventNotificationAttribute>]\n        [showdayofweek]\n        [csv [todrive <ToDriveAttribute>*] [formatjson [quotechar <Character>]]]\ngam calendar|calendars <CalendarEntity> delete events [<EventEntity>]\n#       [batchsize <Integer>] [doit] [<EventNotificationAttribute>]\n\n# Users\n\ngam print users [todrive <ToDriveAttribute>*]\n        ([domain|domains <DomainNameEntity>] [(query <QueryUser>)|(queries <QueryUserList>)]\n         [limittoou <OrgUnitItem>] [deleted_only|only_deleted])\n        [orderby <UserOrderByFieldName> [ascending|descending]]\n        [groups|groupsincolumns]\n        [formatjson [quotechar <Character>]]\ngam <UserTypeEntity> print users [countsonly|countonly]\ngam checkconnection\n\n<Character> ::= a single character\n<Space> ::= an actual space character\n";
-  var KEY = 'gam-syntax-viewer-text';
+  var SAMPLES = [{"name": "Expression grammar (EBNF)", "text": "/* A small expression grammar in W3C-style EBNF */\nexpression ::= term (('+' | '-') term)*\nterm       ::= factor (('*' | '/') factor)*\nfactor     ::= NUMBER | IDENT call? | '(' expression ')' | '-' factor\ncall       ::= '(' (expression (',' expression)*)? ')'\nNUMBER     ::= [0-9]+ ('.' [0-9]+)? (('e' | 'E') ('+' | '-')? [0-9]+)?\nIDENT      ::= [a-zA-Z_] [a-zA-Z0-9_]*\n"}, {"name": "JSON (ABNF, RFC 8259)", "text": "; JSON, from RFC 8259\nJSON-text = ws value ws\nbegin-array     = ws %x5B ws  ; [ left square bracket\nbegin-object    = ws %x7B ws  ; { left curly bracket\nend-array       = ws %x5D ws  ; ] right square bracket\nend-object      = ws %x7D ws  ; } right curly bracket\nname-separator  = ws %x3A ws  ; : colon\nvalue-separator = ws %x2C ws  ; , comma\nws = *(\n        %x20 /              ; Space\n        %x09 /              ; Horizontal tab\n        %x0A /              ; Line feed or New line\n        %x0D )              ; Carriage return\nvalue = false / null / true / object / array / number / string\nfalse = %x66.61.6c.73.65   ; false\nnull  = %x6e.75.6c.6c      ; null\ntrue  = %x74.72.75.65      ; true\nobject = begin-object [ member *( value-separator member ) ] end-object\nmember = string name-separator value\narray = begin-array [ value *( value-separator value ) ] end-array\nnumber = [ minus ] int [ frac ] [ exp ]\ndecimal-point = %x2E       ; .\ndigit1-9 = %x31-39         ; 1-9\ne = %x65 / %x45            ; e E\nexp = e [ minus / plus ] 1*DIGIT\nfrac = decimal-point 1*DIGIT\nint = zero / ( digit1-9 *DIGIT )\nminus = %x2D               ; -\nplus = %x2B                ; +\nzero = %x30                ; 0\nstring = quotation-mark *char quotation-mark\nchar = unescaped /\n    escape (\n        %x22 /          ; \"    quotation mark  U+0022\n        %x5C /          ; \\    reverse solidus U+005C\n        %x2F /          ; /    solidus         U+002F\n        %x62 /          ; b    backspace       U+0008\n        %x66 /          ; f    form feed       U+000C\n        %x6E /          ; n    line feed       U+000A\n        %x72 /          ; r    carriage return U+000D\n        %x74 /          ; t    tab             U+0009\n        %x75 4HEXDIG )  ; uXXXX                U+XXXX\nescape = %x5C              ; \\\nquotation-mark = %x22      ; \"\nunescaped = %x20-21 / %x23-5B / %x5D-10FFFF\n"}, {"name": "Mini language (ISO 14977 EBNF)", "text": "(* ISO/IEC 14977 style: commas, { } repetition, ; terminators *)\nprogram = 'PROGRAM', white space, identifier, white space,\n          'BEGIN', white space,\n          { assignment, \";\", white space },\n          'END.' ;\nidentifier = alphabetic character, { alphabetic character | digit } ;\nnumber = [ \"-\" ], digit, { digit } ;\nstring = '\"' , { all characters - '\"' }, '\"' ;\nassignment = identifier , \":=\" , ( number | identifier | string ) ;\nalphabetic character = \"A\" | \"B\" | \"C\" | \"D\" | \"E\" | \"F\" | \"G\" ;\ndigit = \"0\" | \"1\" | \"2\" | \"3\" | \"4\" | \"5\" | \"6\" | \"7\" | \"8\" | \"9\" ;\nwhite space = ? white space characters ? ;\nall characters = ? all visible characters ? ;\n"}, {"name": "Postal address (BNF)", "text": "<postal-address> ::= <name-part> <street-address> <zip-part>\n<name-part> ::= <personal-part> <last-name> <opt-suffix-part> <EOL> | <personal-part> <name-part>\n<personal-part> ::= <initial> \".\" | <first-name>\n<street-address> ::= <house-num> <street-name> <opt-apt-num> <EOL>\n<zip-part> ::= <town-name> \",\" <state-code> <ZIP-code> <EOL>\n<opt-suffix-part> ::= \"Sr.\" | \"Jr.\" | <roman-numeral> | \"\"\n<opt-apt-num> ::= \"\" | <apt-num>\n"}, {"name": "Command-line usage (informal)", "text": "This document describes the GAM command line syntax in modified BNF, see https://en.wikipedia.org/wiki/Backus-Naur_Form\n\n[] optional item\n() group items\n* item may appear zero or more times\n+ item may appear one or more times\n| separates alternative items\n\n## Primitives\n\n<Digit> ::= 0|1|2|3|4|5|6|7|8|9\n<Number> ::= <Digit>+\n<Float> ::= <Digit>*.<Digit>+\n<String> ::= a string of characters, surrounded by \" if it contains spaces\n<FalseValues>= false|off|no|disabled|0\n<TrueValues> ::= true|on|yes|enabled|1\n<Boolean> ::= <TrueValues>|<FalseValues>\n<CalendarColorIndex> ::= <Number in range 1-24>\n<EventColorName> ::=\n        banana|basil|blueberry|flamingo|graphite|grape|\n        lavender|peacock|sage|tangerine|tomato\n<LabelTextColorHex> ::=\n        #04502e|#094228|#0b4f30|#0d3472|#0d3b44|#3d188e|\n        #464646|#594c05|#662e37|#684e07|#711a36|#7a2e0b|\n        #7a4706|#8a1c0a|#994a64|#ffffff\n<DayOfWeek> ::= mon|tue|wed|thu|fri|sat|sun\n<Locale> ::=\n        ''|    #Not defined\n        ar-eg| #Arabic, Egypt\n        az-az| #Azerbaijani, Azerbaijan\n        be-by| #Belarusian, Belarus\n        bg-bg| #Bulgarian, Bulgaria\n        bn-in| #Bengali, India\n        ca-es| #Catalan, Spain\n        cs-cz| #Czech, Czech Republic\n        cy-gb| #Welsh, United Kingdom\n        da-dk| #Danish, Denmark\n        de-ch| #German, Switzerland\n        de-de  #German, Germany\n<RESubstitution> ::= <String>>\n<EmailAddress> ::= <String>@<DomainName>\n<DomainName> ::= <String>(.<String>)+\n<UserItem> ::= <EmailAddress>|<UniqueID>|<String>\n<UserList> ::= \"<UserItem>(,<UserItem>)*\"\n<FileName> ::= <String>\n<Charset> ::= ascii|latin1|mbcs|utf-8|utf-8-sig|utf-16|<String>\n<FileSelector> ::=\n        file ((<FileName> [charset <Charset>])|\n              (gdoc <UserGoogleDoc>)|\n              (gcsdoc <StorageBucketObjectName>))\n             [delimiter <Character>]\n<UserTypeEntity> ::=\n        (all users|users_na|users_arch)|\n        (user <UserItem>)|\n        (users <UserList>)|\n        (query <QueryUser>)|\n        <FileSelector>\n\n# Aliases\n\ngam create|add alias|aliases <EmailAddressEntity> user|group|target <UniqueID>|<EmailAddress>\n        [verifynotinvitable]\ngam delete alias|aliases [user|group|target] <EmailAddressEntity>\n\n# Calendars\n\ngam calendar|calendars <CalendarEntity> create|add event [id <String>] <EventAttribute>+ [<EventNotificationAttribute>]\n        [showdayofweek]\n        [csv [todrive <ToDriveAttribute>*] [formatjson [quotechar <Character>]]]\ngam calendar|calendars <CalendarEntity> delete events [<EventEntity>]\n#       [batchsize <Integer>] [doit] [<EventNotificationAttribute>]\n\n# Users\n\ngam print users [todrive <ToDriveAttribute>*]\n        ([domain|domains <DomainNameEntity>] [(query <QueryUser>)|(queries <QueryUserList>)]\n         [limittoou <OrgUnitItem>] [deleted_only|only_deleted])\n        [orderby <UserOrderByFieldName> [ascending|descending]]\n        [groups|groupsincolumns]\n        [formatjson [quotechar <Character>]]\ngam <UserTypeEntity> print users [countsonly|countonly]\ngam checkconnection\n\n<Character> ::= a single character\n<Space> ::= an actual space character\n"}];
+  var KEY = 'ebnf-viewer-text';
   var FONT = '13px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
   var mctx = document.createElement('canvas').getContext('2d'); mctx.font = FONT;
   tw = function (s) { return mctx.measureText(s).width; };
 
   var $ = function (s) { return document.querySelector(s); };
-  var doc, srcLabel, tab = 'cmd', sel = null, open = [], limit = 1000, zoom = 1, view = 'diagram', q = '', status = '', ebnfCache = null, xtext = '', xsel = null, xall = false;
+  var doc, srcLabel, lastText = '', dialect = 'auto', order = 'doc', tab = 'rule', sel = null, open = [], limit = 1000, zoom = 1, view = 'diagram', q = '', status = '', ebnfCache = null, xtext = '', xsel = null, xall = false;
 
   function load(text, label, save) {
-    doc = parseDoc(text); srcLabel = label; ebnfCache = null;
+    doc = parseDoc(text, dialect); srcLabel = label; ebnfCache = null; lastText = text;
     sel = doc.commands.length ? { t: 'cmd', id: 0 } : (doc.ruleOrder.length ? { t: 'rule', name: doc.ruleOrder[0] } : null);
+    tab = doc.commands.length ? 'cmd' : 'rule'; xtext = ''; xsel = null; xall = false;
     open = []; view = 'diagram'; status = ''; q = ''; $('#q').value = '';
     if (save) { try { localStorage.setItem(KEY, text); } catch (e) {} }
     renderAll();
   }
 
+  function unk(n) { return !doc.rules[n] && !(doc.builtin && doc.builtin[n.toUpperCase()]); }
+  function disp(n) { return doc.dialect === 'informal' ? '<' + n + '>' : n; }
   function pill(text) { return '<span class="x">' + esc(text) + '</span>'; }
 
   function renderSide() {
     var nIss = doc.issues.undef.length + doc.issues.dups.length + doc.issues.warnings.length;
-    $('#src').textContent = srcLabel + ': ' + doc.commands.length + ' commands, ' + doc.ruleOrder.length + ' rules';
-    var tabs = [['cmd', 'Commands', doc.commands.length], ['rule', 'Rules', doc.ruleOrder.length], ['iss', 'Issues', nIss], ['x', 'Explore', '']];
+    var dName = { ebnf: 'EBNF', abnf: 'ABNF', informal: 'informal usage syntax' }[doc.dialect];
+    $('#src').textContent = srcLabel + ': ' + (doc.commands.length ? doc.commands.length + ' commands, ' : '') + doc.ruleOrder.length + ' rules. ' + (dialect === 'auto' ? 'Detected ' + dName + '.' : '');
+    var tabs = [];
+    if (doc.commands.length) tabs.push(['cmd', 'Commands', doc.commands.length]);
+    tabs.push(['rule', 'Rules', doc.ruleOrder.length], ['iss', 'Issues', nIss]);
+    if (doc.commands.length) tabs.push(['x', 'Explore', '']);
+    if (!tabs.some(function (x) { return x[0] === tab; })) tab = 'rule';
     $('#tabs').innerHTML = tabs.map(function (t) {
       return '<button class="tab" role="tab" data-tab="' + t[0] + '" aria-selected="' + (tab === t[0]) + '">' + t[1] +
         '<span class="n' + (t[0] === 'iss' && t[2] ? ' bad' : '') + '">' + t[2] + '</span></button>';
@@ -752,11 +1105,13 @@ if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseE
       });
       if (!shown) h = '<p class="issue-note">No commands match.</p>';
     } else if (tab === 'rule') {
-      var names = doc.ruleOrder.slice().sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : 1; }), n2 = 0;
+      var names = doc.ruleOrder.slice(), n2 = 0;
+      if (order === 'az') names.sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : 1; });
+      h += '<div class="issue-note"><label class="sel">Order <select id="order" aria-label="Rule order"><option value="doc"' + (order === 'doc' ? ' selected' : '') + '>As written</option><option value="az"' + (order === 'az' ? ' selected' : '') + '>A to Z</option></select></label></div>';
       names.forEach(function (nm) {
         if (terms.length && !terms.every(function (t) { return nm.toLowerCase().indexOf(t) >= 0; })) return;
         var c = doc.rules[nm].length;
-        h += '<button class="item" data-rule="' + esc(nm) + '"' + (cur && cur.t === 'rule' && cur.name === nm ? ' aria-current="true"' : '') + '>' + esc('<' + nm + '>') + (c > 1 ? ' ' + pill('×' + c) : '') + '</button>';
+        h += '<button class="item" data-rule="' + esc(nm) + '"' + (cur && cur.t === 'rule' && cur.name === nm ? ' aria-current="true"' : '') + '>' + esc(doc.dialect === 'informal' ? '<' + nm + '>' : nm) + (c > 1 ? ' ' + pill('×' + c) : '') + (nm === doc.start && doc.dialect !== 'informal' ? ' ' + pill('start') : '') + '</button>';
         n2++;
       });
       if (!n2) h = '<p class="issue-note">No rules match.</p>';
@@ -766,7 +1121,7 @@ if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseE
       var I = doc.issues;
       var typos = I.undef.filter(function (u) { return u.suggest; }), others = I.undef.filter(function (u) { return !u.suggest; });
       function undefBtn(u) {
-        return '<button class="item" data-undef="' + esc(u.name) + '"' + (cur && cur.t === 'undef' && cur.name === u.name ? ' aria-current="true"' : '') + '>' + esc('<' + u.name + '>') +
+        return '<button class="item" data-undef="' + esc(u.name) + '"' + (cur && cur.t === 'undef' && cur.name === u.name ? ' aria-current="true"' : '') + '>' + esc(disp(u.name)) +
           (u.suggest ? ' ' + pill('did you mean <' + u.suggest + '>?') : '') + ' ' + pill('line ' + u.line + ', ' + u.uses.length + (u.uses.length === 1 ? ' use' : ' uses')) + '</button>';
       }
       h += '<div class="issue-h">Likely typos (' + typos.length + ')</div>';
@@ -777,13 +1132,16 @@ if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseE
       others.forEach(function (u) { h += undefBtn(u); });
       h += '<div class="issue-h">Defined more than once (' + I.dups.length + ')</div>';
       I.dups.forEach(function (d) {
-        h += '<button class="item" data-rule="' + esc(d.name) + '">' + esc('<' + d.name + '>') + ' ' + pill(d.count + ' definitions, ' + (d.identical ? 'identical' : 'different') + ', lines ' + d.lines.join(', ')) + '</button>';
+        h += '<button class="item" data-rule="' + esc(d.name) + '">' + esc(disp(d.name)) + ' ' + pill(d.count + ' definitions, ' + (d.identical ? 'identical' : 'different') + ', lines ' + d.lines.join(', ')) + '</button>';
       });
+      h += '<div class="issue-h">Never referenced (' + I.unused.length + ')</div>';
+      h += '<p class="issue-note">Rules nothing else uses. Fine for entry points, a sign of dead code otherwise.</p>';
+      I.unused.forEach(function (n) { h += '<button class="item" data-rule="' + esc(n) + '">' + esc(doc.dialect === 'informal' ? '<' + n + '>' : n) + ' ' + pill('line ' + doc.rules[n][0].line) + '</button>'; });
       h += '<div class="issue-h">Bracket problems (' + I.warnings.length + ')</div>';
       h += '<p class="issue-note">Unbalanced [ ] or ( ) in the source text. The diagram guesses the intent, so check the line.</p>';
       I.warnings.forEach(function (w) {
         if (w.kind === 'cmd') h += '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + ' ' + pill(w.msg + ', line ' + doc.commands[w.id].line) + '</button>';
-        else h += '<button class="item" data-rule="' + esc(w.name) + '">' + esc('<' + w.name + '>') + ' ' + pill(w.msg + ', line ' + doc.rules[w.name][0].line) + '</button>';
+        else h += '<button class="item" data-rule="' + esc(w.name) + '">' + esc(disp(w.name)) + ' ' + pill(w.msg + ', line ' + doc.rules[w.name][0].line) + '</button>';
       });
     }
     $('#list').innerHTML = h;
@@ -811,7 +1169,7 @@ if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseE
     } else {
       h = '<label>Wrap at <input type="range" id="wrap" min="500" max="3000" step="50" value="' + limit + '" aria-label="Wrap width"><span id="wrapv">' + limit + '</span></label>' +
         '<span class="zoom"><button class="btn" data-zoom="-" type="button" aria-label="Zoom out">−</button><span id="zv">' + Math.round(zoom * 100) + '%</span><button class="btn" data-zoom="+" type="button" aria-label="Zoom in">+</button></span>' +
-        '<span class="sp"></span><button class="btn" data-view="ebnf" type="button">Cleaned EBNF</button>';
+        '<span class="sp"></span><button class="btn" data-view="ebnf" type="button">Export as W3C EBNF</button>';
     }
     $('#bar').innerHTML = h;
   }
@@ -820,7 +1178,7 @@ if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseE
     var el = $('#content'), h = '';
     if (view === 'ebnf') {
       if (ebnfCache === null) ebnfCache = docToEBNF(doc);
-      el.innerHTML = '<h2>Cleaned EBNF</h2><p class="meta">W3C-style grammar generated from the whole file. Missing rules are stubbed so it compiles. Paste it into a railroad generator or parser.</p>' +
+      el.innerHTML = '<h2>W3C EBNF export</h2><p class="meta">The whole grammar converted to one consistent W3C-style notation. Missing rules are stubbed so it compiles. Paste it into a railroad generator or parser.</p>' +
         '<div class="row" style="margin:0 0 10px"><button class="btn primary" id="copyE" type="button">Copy to clipboard</button></div>' +
         '<textarea class="ebnf" id="ebnfText" readonly spellcheck="false"></textarea>';
       $('#ebnfText').value = ebnfCache;
@@ -828,13 +1186,13 @@ if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseE
     }
     if (view === 'explore') {
       el.innerHTML = '<h2>Explore command paths</h2><p class="meta">Start typing a command. The next possible words update as you type.</p>' +
-        '<input id="xq" class="xq" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="gam print users " aria-label="Type a gam command">' +
+        '<input id="xq" class="xq" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Type a command">' +
         '<div id="xres"></div>';
-      $('#xq').value = xtext;
+      $('#xq').value = xtext; $('#xq').placeholder = (doc.prefix || 'command') + ' ';
       renderExplore();
       return;
     }
-    if (!sel) { el.innerHTML = '<div class="notice"><p>Nothing to show yet.</p><p>Open your GAM file or paste its text. Lines that start with gam become commands, and lines like &lt;Name&gt; ::= define rules.</p></div>'; return; }
+    if (!sel) { el.innerHTML = '<div class="notice"><p>Nothing to show yet.</p><p>Open a grammar file or paste its text. Rules like name ::= … or name = … become diagrams.</p></div>'; return; }
     var ast = null;
     if (sel.t === 'cmd') {
       var c = doc.commands[sel.id];
@@ -842,7 +1200,7 @@ if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseE
       h += '<pre class="syntax">' + esc(c.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + noteHTML(c.notes) + diagramHTML(c.ast); ast = c.ast;
     } else if (sel.t === 'rule') {
       var defs = doc.rules[sel.name];
-      h += '<h2>' + esc('<' + sel.name + '>') + '</h2><p class="meta">' + esc(defs[0].sub || defs[0].section || 'Rule') + ', line ' + defs[0].line + (defs.length > 1 ? '. Defined ' + defs.length + ' times.' : '') + '</p>';
+      h += '<h2>' + esc(disp(sel.name)) + '</h2><p class="meta">' + esc(defs[0].sub || defs[0].section || 'Rule') + ', line ' + defs[0].line + (defs.length > 1 ? '. Defined ' + defs.length + ' times.' : '') + '</p>';
       defs.forEach(function (d, i) {
         if (defs.length > 1) h += '<div class="def-h">Definition ' + (i + 1) + ' of ' + defs.length + ', line ' + d.line + '</div>';
         h += '<pre class="syntax">' + esc(d.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + noteHTML(d.notes) + diagramHTML(d.ast);
@@ -850,11 +1208,11 @@ if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseE
       ast = { t: 'seq', items: defs.map(function (d) { return d.ast; }) };
     } else {
       var u = doc.issues.undef.filter(function (x) { return x.name === sel.name; })[0];
-      h += '<h2>' + esc('<' + sel.name + '>') + '</h2><p class="meta">Referenced but never defined' + (u && u.suggest ? '. Probably a typo for ' + esc('<' + u.suggest + '>') : '') + '</p><div class="notice"><p>Add a rule for this name, or fix the spelling at the places below, so a strict parser can compile the grammar.</p>' +
-        (u && u.suggest ? '<p><button class="chip" data-rule="' + esc(u.suggest) + '" type="button">View ' + esc('<' + u.suggest + '>') + '</button></p>' : '') + '<p>Used in:</p><div class="uses">';
+      h += '<h2>' + esc(disp(sel.name)) + '</h2><p class="meta">Referenced but never defined' + (u && u.suggest ? '. Probably a typo for ' + esc(disp(u.suggest)) : '') + '</p><div class="notice"><p>Add a rule for this name, or fix the spelling at the places below, so a strict parser can compile the grammar.</p>' +
+        (u && u.suggest ? '<p><button class="chip" data-rule="' + esc(u.suggest) + '" type="button">View ' + esc(disp(u.suggest)) + '</button></p>' : '') + '<p>Used in:</p><div class="uses">';
       var seenUse = {};
       (u ? u.uses : []).filter(function (w) { var k = w.kind + (w.kind === 'cmd' ? w.id : w.name); if (seenUse[k]) return false; seenUse[k] = 1; return true; }).slice(0, 40).forEach(function (w) {
-        h += w.kind === 'cmd' ? '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + ' ' + pill('line ' + w.line) + '</button>' : '<button class="item" data-rule="' + esc(w.name) + '">' + esc('<' + w.name + '>') + ' ' + pill('line ' + w.line) + '</button>';
+        h += w.kind === 'cmd' ? '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + ' ' + pill('line ' + w.line) + '</button>' : '<button class="item" data-rule="' + esc(w.name) + '">' + esc(disp(w.name)) + ' ' + pill('line ' + w.line) + '</button>';
       });
       h += '</div></div>';
     }
@@ -862,7 +1220,7 @@ if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseE
       var ns = nts(ast);
       if (ns.length) {
         h += '<div class="refs"><h3>Rules used here</h3><div class="chips">' + ns.map(function (n) {
-          return '<button class="chip' + (doc.rules[n] ? '' : ' undef') + '" data-open="' + esc(n) + '" title="' + (doc.rules[n] ? 'Show this rule below' : 'Never defined in this file') + '">' + esc(n) + '</button>';
+          return '<button class="chip' + (unk(n) ? ' undef' : '') + '" data-open="' + esc(n) + '" title="' + (doc.rules[n] ? 'Show this rule below' : unk(n) ? 'Never defined in this file' : 'Standard core rule, defined by the notation') + '">' + esc(n) + '</button>';
         }).join('') + '</div></div>';
       }
     }
@@ -871,7 +1229,7 @@ if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseE
       h += '<div class="drawer"><h3>Opened rules</h3>';
       open.forEach(function (n) {
         var defs = doc.rules[n];
-        h += '<div class="card"><div class="card-h"><b>' + esc('<' + n + '>') + '</b><button class="btn" data-rule="' + esc(n) + '" type="button">Open as main</button><button class="btn" data-close="' + esc(n) + '" type="button">Close</button></div>';
+        h += '<div class="card"><div class="card-h"><b>' + esc(disp(n)) + '</b><button class="btn" data-rule="' + esc(n) + '" type="button">Open as main</button><button class="btn" data-close="' + esc(n) + '" type="button">Close</button></div>';
         defs.forEach(function (d) { h += '<pre class="syntax">' + esc(d.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + noteHTML(d.notes) + diagramHTML(d.ast); });
         h += '</div>';
       });
@@ -894,7 +1252,7 @@ if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseE
     kws.slice(0, cap).forEach(function (e) { h += '<button class="chip kw" data-x="' + esc(e.text) + '" type="button">' + esc(e.text) + '<span class="cnt">' + e.count + '</span></button>'; });
     vals.forEach(function (e) {
       var nm = e.text.slice(1, -1);
-      h += '<button class="chip' + (doc.rules[nm] ? '' : ' undef') + '" data-open="' + esc(nm) + '" type="button" title="A value goes here. Click to see its rule.">' + esc(e.text) + '<span class="cnt">' + e.count + '</span></button>';
+      h += '<button class="chip' + (unk(nm) ? ' undef' : '') + '" data-open="' + esc(nm) + '" type="button" title="A value goes here. Click to see its rule.">' + esc(e.text) + '<span class="cnt">' + e.count + '</span></button>';
     });
     if (kws.length > cap) h += '<button class="xmore" data-xall="1" type="button">Show all ' + kws.length + '</button>';
     if (!kws.length && !vals.length) h += '<span class="meta">Nothing more to add.</span>';
@@ -987,10 +1345,18 @@ if (typeof module !== 'undefined') module.exports = { parseDoc: parseDoc, parseE
     }
   });
 
+  $('#samples').innerHTML = '<option value="">Choose…</option>' + SAMPLES.map(function (s, i) { return '<option value="' + i + '">' + esc(s.name) + '</option>'; }).join('');
+  $('#samples').addEventListener('change', function (e) {
+    var s = SAMPLES[+e.target.value]; if (!s) return;
+    dialect = 'auto'; $('#dialect').value = 'auto'; load(s.text, s.name, false); e.target.value = '';
+  });
+  $('#dialect').addEventListener('change', function (e) { dialect = e.target.value; if (lastText) load(lastText, srcLabel, false); });
+  document.addEventListener('change', function (e) { if (e.target.id === 'order') { order = e.target.value; renderSide(); } });
+
   var saved = null;
   try { saved = localStorage.getItem(KEY); } catch (e) {}
-  if (saved && saved.length > 200) load(saved, 'Your file (remembered in this browser)', false);
-  else load(SAMPLE, 'Sample excerpt, open your file to see everything', false);
+  if (saved && saved.length > 100) load(saved, 'Your file (remembered in this browser)', false);
+  else load(SAMPLES[0].text, SAMPLES[0].name, false);
 })();
 </script>
 </body>

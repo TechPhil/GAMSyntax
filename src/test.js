@@ -1,16 +1,12 @@
-const core=require('./core.js');
-const fs=require('fs');
-const doc=core.parseDoc(fs.readFileSync('./sample.txt','utf8'));
-console.log('rules',doc.ruleOrder.length,'cmds',doc.commands.length);
-console.log(doc.commands.map(c=>c.id+': '+c.label));
-console.log('issues',JSON.stringify(doc.issues.warnings),doc.issues.undef.map(u=>u.name).join(','),JSON.stringify(doc.issues.dups));
-const show=(n,d=0)=>JSON.stringify(n);
-console.log(show(doc.rules['Boolean'][0].ast));
-console.log(show(doc.rules['Number'][0].ast));
-console.log(show(doc.rules['UserList'][0].ast));
-console.log(doc.rules['Locale'][0].ast.items.length, doc.rules['LabelTextColorHex'][0].ast.items.length);
-console.log(doc.commands[0].text);
-console.log(JSON.stringify(doc.commands[0].ast).slice(0,400));
-for(const c of doc.commands){const r=core.renderSVG(c.ast,1100); console.log(c.id,Math.round(r.w),Math.round(r.h), r.svg.includes('NaN'))}
-for(const n of doc.ruleOrder){const r=core.renderSVG(doc.rules[n][0].ast,1100); if(r.svg.includes('NaN')||r.svg.includes('undefined'))console.log('bad',n)}
-console.log(core.docToEBNF(doc).split('\n').slice(0,40).join('\n'));
+// Parses every example (and any files given on the command line) and checks that all diagrams lay out.
+// Usage: cd src && node test.js [more-grammar-files...]
+const core = require('./core.js'), fs = require('fs'), path = require('path');
+const files = fs.readdirSync(path.join(__dirname, 'samples')).map(f => path.join(__dirname, 'samples', f)).concat(process.argv.slice(2));
+for (const f of files) {
+  const doc = core.parseDoc(fs.readFileSync(f, 'utf8'));
+  let bad = 0;
+  for (const n of doc.ruleOrder) for (const d of doc.rules[n]) if (/NaN|undefined/.test(core.renderSVG(d.ast, 1000).svg)) bad++;
+  for (const c of doc.commands) if (/NaN|undefined/.test(core.renderSVG(c.ast, 1000).svg)) bad++;
+  console.log(path.basename(f).padEnd(22), doc.dialect.padEnd(9), 'rules', String(doc.ruleOrder.length).padStart(4), 'commands', String(doc.commands.length).padStart(4),
+    'undefined', String(doc.issues.undef.length).padStart(3), 'bracket warnings', String(doc.issues.warnings.length).padStart(3), bad ? 'LAYOUT ERRORS ' + bad : 'ok');
+}

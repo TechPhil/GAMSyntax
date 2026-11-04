@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>GAM syntax viewer</title>
+<title>EBNF viewer</title>
 <style>
 :root{
   --bg:#eef1f4; --panel:#fbfcfd; --ink:#18222c; --muted:#5a6a78; --rule:#d3dae1; --hover:#e6ebf0; --sel:#dfe7fb;
@@ -41,6 +41,8 @@ button{cursor:pointer}
 .side-head h1{margin:0 0 2px;font-size:17px;font-weight:650;letter-spacing:-.01em}
 .src{margin:0;color:var(--muted);font-size:12.5px}
 .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.sel{display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12.5px;min-width:0}
+.sel select{max-width:100%;border:1px solid var(--rule);background:var(--panel);color:var(--ink);border-radius:6px;padding:4px 6px;font-size:12.5px}
 .btn{border:1px solid var(--rule);background:var(--panel);border-radius:6px;padding:5px 10px;font-size:13px}
 .btn:hover{background:var(--hover)}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
@@ -119,6 +121,8 @@ svg.rr{display:block}
 .rr-term rect{fill:var(--term-bg);stroke:var(--term-stroke);stroke-width:1.3}
 .rr-nt rect{fill:var(--nt-bg);stroke:var(--nt-stroke);stroke-width:1.3}
 .rr-nt{cursor:pointer}
+.rr-class rect{fill:var(--term-bg);stroke:var(--term-stroke);stroke-width:1.3;stroke-dasharray:4 3}
+.rr-label{font-family:var(--sans);font-size:12px;font-style:italic;fill:var(--muted)}
 .rr-nt:hover rect{stroke-width:2.4}
 .rr-enum rect{fill:none;stroke:var(--enum-stroke);stroke-dasharray:4 3}
 .rr-enum text.rr-enum-title{fill:var(--muted);font-family:var(--sans);font-size:12px}
@@ -134,16 +138,25 @@ svg.rr{display:block}
 <div class="app">
   <aside class="side">
     <div class="side-head">
-      <h1>GAM syntax viewer</h1>
+      <h1>EBNF viewer</h1>
       <p class="src" id="src"></p>
       <div class="row">
-        <button class="btn primary" id="openBtn" type="button">Open GAM file</button>
+        <button class="btn primary" id="openBtn" type="button">Open file</button>
         <button class="btn" id="pasteBtn" type="button">Paste text</button>
-        <input type="file" id="file" hidden accept=".txt,.md,.bnf,.text,text/*">
+        <input type="file" id="file" hidden accept=".txt,.md,.bnf,.ebnf,.abnf,.g4,.text,text/*">
+      </div>
+      <div class="row">
+        <label class="sel">Syntax <select id="dialect" aria-label="Grammar syntax">
+          <option value="auto">Auto-detect</option>
+          <option value="ebnf">EBNF / BNF (W3C, ISO, ANTLR style)</option>
+          <option value="abnf">ABNF (RFC 5234)</option>
+          <option value="informal">Informal usage lines (command syntax)</option>
+        </select></label>
+        <label class="sel">Examples <select id="samples" aria-label="Load an example"></select></label>
       </div>
     </div>
     <div class="tabs" role="tablist" id="tabs"></div>
-    <input class="search" id="q" type="search" placeholder="Filter, e.g. print users" aria-label="Filter">
+    <input class="search" id="q" type="search" placeholder="Filter" aria-label="Filter">
     <div class="list" id="list"></div>
   </aside>
   <main class="main" id="main">
@@ -152,9 +165,9 @@ svg.rr{display:block}
   </main>
 </div>
 
-<div class="panel" id="panel" role="dialog" aria-modal="true" aria-label="Paste GAM syntax">
+<div class="panel" id="panel" role="dialog" aria-modal="true" aria-label="Paste a grammar">
   <div class="panel-box">
-    <h2>Paste the GAM syntax text</h2>
+    <h2>Paste a grammar</h2>
     <p class="src">Everything stays in your browser.</p>
     <textarea id="paste" spellcheck="false"></textarea>
     <div class="row">
@@ -169,29 +182,37 @@ __CORE__
 </script>
 <script>
 (function () {
-  var SAMPLE = __SAMPLE__;
-  var KEY = 'gam-syntax-viewer-text';
+  var SAMPLES = __SAMPLES__;
+  var KEY = 'ebnf-viewer-text';
   var FONT = '13px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace';
   var mctx = document.createElement('canvas').getContext('2d'); mctx.font = FONT;
   tw = function (s) { return mctx.measureText(s).width; };
 
   var $ = function (s) { return document.querySelector(s); };
-  var doc, srcLabel, tab = 'cmd', sel = null, open = [], limit = 1000, zoom = 1, view = 'diagram', q = '', status = '', ebnfCache = null, xtext = '', xsel = null, xall = false;
+  var doc, srcLabel, lastText = '', dialect = 'auto', order = 'doc', tab = 'rule', sel = null, open = [], limit = 1000, zoom = 1, view = 'diagram', q = '', status = '', ebnfCache = null, xtext = '', xsel = null, xall = false;
 
   function load(text, label, save) {
-    doc = parseDoc(text); srcLabel = label; ebnfCache = null;
+    doc = parseDoc(text, dialect); srcLabel = label; ebnfCache = null; lastText = text;
     sel = doc.commands.length ? { t: 'cmd', id: 0 } : (doc.ruleOrder.length ? { t: 'rule', name: doc.ruleOrder[0] } : null);
+    tab = doc.commands.length ? 'cmd' : 'rule'; xtext = ''; xsel = null; xall = false;
     open = []; view = 'diagram'; status = ''; q = ''; $('#q').value = '';
     if (save) { try { localStorage.setItem(KEY, text); } catch (e) {} }
     renderAll();
   }
 
+  function unk(n) { return !doc.rules[n] && !(doc.builtin && doc.builtin[n.toUpperCase()]); }
+  function disp(n) { return doc.dialect === 'informal' ? '<' + n + '>' : n; }
   function pill(text) { return '<span class="x">' + esc(text) + '</span>'; }
 
   function renderSide() {
     var nIss = doc.issues.undef.length + doc.issues.dups.length + doc.issues.warnings.length;
-    $('#src').textContent = srcLabel + ': ' + doc.commands.length + ' commands, ' + doc.ruleOrder.length + ' rules';
-    var tabs = [['cmd', 'Commands', doc.commands.length], ['rule', 'Rules', doc.ruleOrder.length], ['iss', 'Issues', nIss], ['x', 'Explore', '']];
+    var dName = { ebnf: 'EBNF', abnf: 'ABNF', informal: 'informal usage syntax' }[doc.dialect];
+    $('#src').textContent = srcLabel + ': ' + (doc.commands.length ? doc.commands.length + ' commands, ' : '') + doc.ruleOrder.length + ' rules. ' + (dialect === 'auto' ? 'Detected ' + dName + '.' : '');
+    var tabs = [];
+    if (doc.commands.length) tabs.push(['cmd', 'Commands', doc.commands.length]);
+    tabs.push(['rule', 'Rules', doc.ruleOrder.length], ['iss', 'Issues', nIss]);
+    if (doc.commands.length) tabs.push(['x', 'Explore', '']);
+    if (!tabs.some(function (x) { return x[0] === tab; })) tab = 'rule';
     $('#tabs').innerHTML = tabs.map(function (t) {
       return '<button class="tab" role="tab" data-tab="' + t[0] + '" aria-selected="' + (tab === t[0]) + '">' + t[1] +
         '<span class="n' + (t[0] === 'iss' && t[2] ? ' bad' : '') + '">' + t[2] + '</span></button>';
@@ -209,11 +230,13 @@ __CORE__
       });
       if (!shown) h = '<p class="issue-note">No commands match.</p>';
     } else if (tab === 'rule') {
-      var names = doc.ruleOrder.slice().sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : 1; }), n2 = 0;
+      var names = doc.ruleOrder.slice(), n2 = 0;
+      if (order === 'az') names.sort(function (a, b) { return a.toLowerCase() < b.toLowerCase() ? -1 : 1; });
+      h += '<div class="issue-note"><label class="sel">Order <select id="order" aria-label="Rule order"><option value="doc"' + (order === 'doc' ? ' selected' : '') + '>As written</option><option value="az"' + (order === 'az' ? ' selected' : '') + '>A to Z</option></select></label></div>';
       names.forEach(function (nm) {
         if (terms.length && !terms.every(function (t) { return nm.toLowerCase().indexOf(t) >= 0; })) return;
         var c = doc.rules[nm].length;
-        h += '<button class="item" data-rule="' + esc(nm) + '"' + (cur && cur.t === 'rule' && cur.name === nm ? ' aria-current="true"' : '') + '>' + esc('<' + nm + '>') + (c > 1 ? ' ' + pill('×' + c) : '') + '</button>';
+        h += '<button class="item" data-rule="' + esc(nm) + '"' + (cur && cur.t === 'rule' && cur.name === nm ? ' aria-current="true"' : '') + '>' + esc(doc.dialect === 'informal' ? '<' + nm + '>' : nm) + (c > 1 ? ' ' + pill('×' + c) : '') + (nm === doc.start && doc.dialect !== 'informal' ? ' ' + pill('start') : '') + '</button>';
         n2++;
       });
       if (!n2) h = '<p class="issue-note">No rules match.</p>';
@@ -223,7 +246,7 @@ __CORE__
       var I = doc.issues;
       var typos = I.undef.filter(function (u) { return u.suggest; }), others = I.undef.filter(function (u) { return !u.suggest; });
       function undefBtn(u) {
-        return '<button class="item" data-undef="' + esc(u.name) + '"' + (cur && cur.t === 'undef' && cur.name === u.name ? ' aria-current="true"' : '') + '>' + esc('<' + u.name + '>') +
+        return '<button class="item" data-undef="' + esc(u.name) + '"' + (cur && cur.t === 'undef' && cur.name === u.name ? ' aria-current="true"' : '') + '>' + esc(disp(u.name)) +
           (u.suggest ? ' ' + pill('did you mean <' + u.suggest + '>?') : '') + ' ' + pill('line ' + u.line + ', ' + u.uses.length + (u.uses.length === 1 ? ' use' : ' uses')) + '</button>';
       }
       h += '<div class="issue-h">Likely typos (' + typos.length + ')</div>';
@@ -234,13 +257,16 @@ __CORE__
       others.forEach(function (u) { h += undefBtn(u); });
       h += '<div class="issue-h">Defined more than once (' + I.dups.length + ')</div>';
       I.dups.forEach(function (d) {
-        h += '<button class="item" data-rule="' + esc(d.name) + '">' + esc('<' + d.name + '>') + ' ' + pill(d.count + ' definitions, ' + (d.identical ? 'identical' : 'different') + ', lines ' + d.lines.join(', ')) + '</button>';
+        h += '<button class="item" data-rule="' + esc(d.name) + '">' + esc(disp(d.name)) + ' ' + pill(d.count + ' definitions, ' + (d.identical ? 'identical' : 'different') + ', lines ' + d.lines.join(', ')) + '</button>';
       });
+      h += '<div class="issue-h">Never referenced (' + I.unused.length + ')</div>';
+      h += '<p class="issue-note">Rules nothing else uses. Fine for entry points, a sign of dead code otherwise.</p>';
+      I.unused.forEach(function (n) { h += '<button class="item" data-rule="' + esc(n) + '">' + esc(doc.dialect === 'informal' ? '<' + n + '>' : n) + ' ' + pill('line ' + doc.rules[n][0].line) + '</button>'; });
       h += '<div class="issue-h">Bracket problems (' + I.warnings.length + ')</div>';
       h += '<p class="issue-note">Unbalanced [ ] or ( ) in the source text. The diagram guesses the intent, so check the line.</p>';
       I.warnings.forEach(function (w) {
         if (w.kind === 'cmd') h += '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + ' ' + pill(w.msg + ', line ' + doc.commands[w.id].line) + '</button>';
-        else h += '<button class="item" data-rule="' + esc(w.name) + '">' + esc('<' + w.name + '>') + ' ' + pill(w.msg + ', line ' + doc.rules[w.name][0].line) + '</button>';
+        else h += '<button class="item" data-rule="' + esc(w.name) + '">' + esc(disp(w.name)) + ' ' + pill(w.msg + ', line ' + doc.rules[w.name][0].line) + '</button>';
       });
     }
     $('#list').innerHTML = h;
@@ -268,7 +294,7 @@ __CORE__
     } else {
       h = '<label>Wrap at <input type="range" id="wrap" min="500" max="3000" step="50" value="' + limit + '" aria-label="Wrap width"><span id="wrapv">' + limit + '</span></label>' +
         '<span class="zoom"><button class="btn" data-zoom="-" type="button" aria-label="Zoom out">−</button><span id="zv">' + Math.round(zoom * 100) + '%</span><button class="btn" data-zoom="+" type="button" aria-label="Zoom in">+</button></span>' +
-        '<span class="sp"></span><button class="btn" data-view="ebnf" type="button">Cleaned EBNF</button>';
+        '<span class="sp"></span><button class="btn" data-view="ebnf" type="button">Export as W3C EBNF</button>';
     }
     $('#bar').innerHTML = h;
   }
@@ -277,7 +303,7 @@ __CORE__
     var el = $('#content'), h = '';
     if (view === 'ebnf') {
       if (ebnfCache === null) ebnfCache = docToEBNF(doc);
-      el.innerHTML = '<h2>Cleaned EBNF</h2><p class="meta">W3C-style grammar generated from the whole file. Missing rules are stubbed so it compiles. Paste it into a railroad generator or parser.</p>' +
+      el.innerHTML = '<h2>W3C EBNF export</h2><p class="meta">The whole grammar converted to one consistent W3C-style notation. Missing rules are stubbed so it compiles. Paste it into a railroad generator or parser.</p>' +
         '<div class="row" style="margin:0 0 10px"><button class="btn primary" id="copyE" type="button">Copy to clipboard</button></div>' +
         '<textarea class="ebnf" id="ebnfText" readonly spellcheck="false"></textarea>';
       $('#ebnfText').value = ebnfCache;
@@ -285,13 +311,13 @@ __CORE__
     }
     if (view === 'explore') {
       el.innerHTML = '<h2>Explore command paths</h2><p class="meta">Start typing a command. The next possible words update as you type.</p>' +
-        '<input id="xq" class="xq" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="gam print users " aria-label="Type a gam command">' +
+        '<input id="xq" class="xq" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" aria-label="Type a command">' +
         '<div id="xres"></div>';
-      $('#xq').value = xtext;
+      $('#xq').value = xtext; $('#xq').placeholder = (doc.prefix || 'command') + ' ';
       renderExplore();
       return;
     }
-    if (!sel) { el.innerHTML = '<div class="notice"><p>Nothing to show yet.</p><p>Open your GAM file or paste its text. Lines that start with gam become commands, and lines like &lt;Name&gt; ::= define rules.</p></div>'; return; }
+    if (!sel) { el.innerHTML = '<div class="notice"><p>Nothing to show yet.</p><p>Open a grammar file or paste its text. Rules like name ::= … or name = … become diagrams.</p></div>'; return; }
     var ast = null;
     if (sel.t === 'cmd') {
       var c = doc.commands[sel.id];
@@ -299,7 +325,7 @@ __CORE__
       h += '<pre class="syntax">' + esc(c.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + noteHTML(c.notes) + diagramHTML(c.ast); ast = c.ast;
     } else if (sel.t === 'rule') {
       var defs = doc.rules[sel.name];
-      h += '<h2>' + esc('<' + sel.name + '>') + '</h2><p class="meta">' + esc(defs[0].sub || defs[0].section || 'Rule') + ', line ' + defs[0].line + (defs.length > 1 ? '. Defined ' + defs.length + ' times.' : '') + '</p>';
+      h += '<h2>' + esc(disp(sel.name)) + '</h2><p class="meta">' + esc(defs[0].sub || defs[0].section || 'Rule') + ', line ' + defs[0].line + (defs.length > 1 ? '. Defined ' + defs.length + ' times.' : '') + '</p>';
       defs.forEach(function (d, i) {
         if (defs.length > 1) h += '<div class="def-h">Definition ' + (i + 1) + ' of ' + defs.length + ', line ' + d.line + '</div>';
         h += '<pre class="syntax">' + esc(d.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + noteHTML(d.notes) + diagramHTML(d.ast);
@@ -307,11 +333,11 @@ __CORE__
       ast = { t: 'seq', items: defs.map(function (d) { return d.ast; }) };
     } else {
       var u = doc.issues.undef.filter(function (x) { return x.name === sel.name; })[0];
-      h += '<h2>' + esc('<' + sel.name + '>') + '</h2><p class="meta">Referenced but never defined' + (u && u.suggest ? '. Probably a typo for ' + esc('<' + u.suggest + '>') : '') + '</p><div class="notice"><p>Add a rule for this name, or fix the spelling at the places below, so a strict parser can compile the grammar.</p>' +
-        (u && u.suggest ? '<p><button class="chip" data-rule="' + esc(u.suggest) + '" type="button">View ' + esc('<' + u.suggest + '>') + '</button></p>' : '') + '<p>Used in:</p><div class="uses">';
+      h += '<h2>' + esc(disp(sel.name)) + '</h2><p class="meta">Referenced but never defined' + (u && u.suggest ? '. Probably a typo for ' + esc(disp(u.suggest)) : '') + '</p><div class="notice"><p>Add a rule for this name, or fix the spelling at the places below, so a strict parser can compile the grammar.</p>' +
+        (u && u.suggest ? '<p><button class="chip" data-rule="' + esc(u.suggest) + '" type="button">View ' + esc(disp(u.suggest)) + '</button></p>' : '') + '<p>Used in:</p><div class="uses">';
       var seenUse = {};
       (u ? u.uses : []).filter(function (w) { var k = w.kind + (w.kind === 'cmd' ? w.id : w.name); if (seenUse[k]) return false; seenUse[k] = 1; return true; }).slice(0, 40).forEach(function (w) {
-        h += w.kind === 'cmd' ? '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + ' ' + pill('line ' + w.line) + '</button>' : '<button class="item" data-rule="' + esc(w.name) + '">' + esc('<' + w.name + '>') + ' ' + pill('line ' + w.line) + '</button>';
+        h += w.kind === 'cmd' ? '<button class="item" data-cmd="' + w.id + '">' + esc(doc.commands[w.id].label) + ' ' + pill('line ' + w.line) + '</button>' : '<button class="item" data-rule="' + esc(w.name) + '">' + esc(disp(w.name)) + ' ' + pill('line ' + w.line) + '</button>';
       });
       h += '</div></div>';
     }
@@ -319,7 +345,7 @@ __CORE__
       var ns = nts(ast);
       if (ns.length) {
         h += '<div class="refs"><h3>Rules used here</h3><div class="chips">' + ns.map(function (n) {
-          return '<button class="chip' + (doc.rules[n] ? '' : ' undef') + '" data-open="' + esc(n) + '" title="' + (doc.rules[n] ? 'Show this rule below' : 'Never defined in this file') + '">' + esc(n) + '</button>';
+          return '<button class="chip' + (unk(n) ? ' undef' : '') + '" data-open="' + esc(n) + '" title="' + (doc.rules[n] ? 'Show this rule below' : unk(n) ? 'Never defined in this file' : 'Standard core rule, defined by the notation') + '">' + esc(n) + '</button>';
         }).join('') + '</div></div>';
       }
     }
@@ -328,7 +354,7 @@ __CORE__
       h += '<div class="drawer"><h3>Opened rules</h3>';
       open.forEach(function (n) {
         var defs = doc.rules[n];
-        h += '<div class="card"><div class="card-h"><b>' + esc('<' + n + '>') + '</b><button class="btn" data-rule="' + esc(n) + '" type="button">Open as main</button><button class="btn" data-close="' + esc(n) + '" type="button">Close</button></div>';
+        h += '<div class="card"><div class="card-h"><b>' + esc(disp(n)) + '</b><button class="btn" data-rule="' + esc(n) + '" type="button">Open as main</button><button class="btn" data-close="' + esc(n) + '" type="button">Close</button></div>';
         defs.forEach(function (d) { h += '<pre class="syntax">' + esc(d.text.replace(/\n\s+/g, '\n    ')) + '</pre>' + noteHTML(d.notes) + diagramHTML(d.ast); });
         h += '</div>';
       });
@@ -351,7 +377,7 @@ __CORE__
     kws.slice(0, cap).forEach(function (e) { h += '<button class="chip kw" data-x="' + esc(e.text) + '" type="button">' + esc(e.text) + '<span class="cnt">' + e.count + '</span></button>'; });
     vals.forEach(function (e) {
       var nm = e.text.slice(1, -1);
-      h += '<button class="chip' + (doc.rules[nm] ? '' : ' undef') + '" data-open="' + esc(nm) + '" type="button" title="A value goes here. Click to see its rule.">' + esc(e.text) + '<span class="cnt">' + e.count + '</span></button>';
+      h += '<button class="chip' + (unk(nm) ? ' undef' : '') + '" data-open="' + esc(nm) + '" type="button" title="A value goes here. Click to see its rule.">' + esc(e.text) + '<span class="cnt">' + e.count + '</span></button>';
     });
     if (kws.length > cap) h += '<button class="xmore" data-xall="1" type="button">Show all ' + kws.length + '</button>';
     if (!kws.length && !vals.length) h += '<span class="meta">Nothing more to add.</span>';
@@ -444,10 +470,18 @@ __CORE__
     }
   });
 
+  $('#samples').innerHTML = '<option value="">Choose…</option>' + SAMPLES.map(function (s, i) { return '<option value="' + i + '">' + esc(s.name) + '</option>'; }).join('');
+  $('#samples').addEventListener('change', function (e) {
+    var s = SAMPLES[+e.target.value]; if (!s) return;
+    dialect = 'auto'; $('#dialect').value = 'auto'; load(s.text, s.name, false); e.target.value = '';
+  });
+  $('#dialect').addEventListener('change', function (e) { dialect = e.target.value; if (lastText) load(lastText, srcLabel, false); });
+  document.addEventListener('change', function (e) { if (e.target.id === 'order') { order = e.target.value; renderSide(); } });
+
   var saved = null;
   try { saved = localStorage.getItem(KEY); } catch (e) {}
-  if (saved && saved.length > 200) load(saved, 'Your file (remembered in this browser)', false);
-  else load(SAMPLE, 'Sample excerpt, open your file to see everything', false);
+  if (saved && saved.length > 100) load(saved, 'Your file (remembered in this browser)', false);
+  else load(SAMPLES[0].text, SAMPLES[0].name, false);
 })();
 </script>
 </body>
